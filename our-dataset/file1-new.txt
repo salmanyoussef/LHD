@@ -1,0 +1,19 @@
+def add(a, b):
+    # simple addition
+    return a + b
+
+def multiply(a, b):
+    result = a * b
+    return result
+
+def greet_user(username):
+    print("Hello,", username + "!")
+
+def main():
+    x = add(5, 10)
+    y = multiply(x, 3)
+    greet_user("Alice")
+    print("Final result:", y)
+
+if __name__ == "__main__":
+    main()

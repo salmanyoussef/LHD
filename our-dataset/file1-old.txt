@@ -1,0 +1,17 @@
+def add(a, b):
+    return a + b
+
+def multiply(a, b):
+    return a * b
+
+def greet(name):
+    print("Hello " + name)
+
+def main():
+    x = add(5, 10)
+    y = multiply(x, 2)
+    greet("Alice")
+    print("Result:", y)
+
+if __name__ == "__main__":
+    main()

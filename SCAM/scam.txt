@@ -1,0 +1,316 @@
+# Core Concepts in sdiff Implementation
+
+## 1. Buffered I/O and Line Processing
+
+### Concept
+Instead of reading files line-by-line (which is slow for large files), sdiff uses a buffering strategy that reads large chunks of data into memory and processes them efficiently.
+
+### Implementation
+- **Buffer Size**: 64KB chunks (SDIFF_BUFSIZE = 65536)
+- **LineFilter Class**: Manages a buffer that holds file data
+- **Methods**:
+  - `refill()`: Loads next chunk when buffer is exhausted
+  - `copy()`: Copies N lines to output without full parsing
+  - `skip()`: Advances position N lines without output
+  - `snarf()`: Extracts a single line into a string
+
+### Why It Matters
+- Reduces system calls (I/O operations are expensive)
+- Processes data in memory (much faster than disk access)
+- Handles large files efficiently without loading entire file
+
+
+## 2. Process Management and IPC (Inter-Process Communication)
+
+### Concept
+sdiff doesn't do the actual comparison itself - it delegates to the `diff` program and coordinates the interaction between three processes:
+1. The sdiff process (coordinator)
+2. The diff subprocess (comparison engine)
+3. The editor subprocess (when user chooses to edit)
+
+### Implementation
+```
+sdiff (main process)
+  ├─> diff (subprocess via pipe)
+  │     └─> stdout → sdiff reads diff output
+  └─> editor (subprocess when needed)
+        └─> edits temporary file
+```
+
+### Key Mechanisms
+- **Pipes**: Bidirectional communication channels between processes
+- **File Descriptors**: Low-level handles for I/O streams
+- **Process IDs**: Track child processes for cleanup
+- **Wait/Waitpid**: Parent waits for child completion
+
+### Why This Design
+- Reuses existing, well-tested diff algorithm
+- Modular: diff and editor are separate concerns
+- Allows for different diff implementations
+- Editor choice is user-configurable
+
+
+## 3. Signal Handling and Resource Cleanup
+
+### Concept
+Programs must handle interruptions gracefully (Ctrl+C, kill signals, system shutdown) and clean up resources (temp files, child processes).
+
+### Signals Handled
+- **SIGINT**: Interrupt (Ctrl+C)
+- **SIGTERM**: Termination request
+- **SIGHUP**: Hangup (terminal closed)
+- **SIGQUIT**: Quit signal
+- **SIGPIPE**: Broken pipe (writing to closed pipe)
+
+### Cleanup Strategy
+```
+Signal Received → Signal Handler → Set Flag → Check Point → Cleanup
+```
+
+### Critical Cleanup Tasks
+1. Kill child processes (diff, editor)
+2. Remove temporary files
+3. Restore signal handlers
+4. Exit with appropriate status code
+
+### Why It Matters
+- Prevents orphaned processes consuming resources
+- Avoids leaving temp files littering the filesystem
+- Ensures predictable behavior on interruption
+- Maintains system stability
+
+
+## 4. Interactive Command Interpreter
+
+### Concept
+A simple command-line interface that prompts users for merge decisions and executes their choices.
+
+### Command Set
+| Command | Meaning |
+|---------|---------|
+| l, 1    | Use left version |
+| r, 2    | Use right version |
+| e       | Edit a new version |
+| e1, el  | Edit then use left |
+| e2, er  | Edit then use right |
+| eb      | Edit both versions |
+| ed      | Edit both with headers (diff format) |
+| s       | Silent mode (suppress common lines) |
+| v       | Verbose mode (show common lines) |
+| q       | Quit |
+
+### Command Processing Loop
+```
+while (conflicts exist):
+    display conflict
+    prompt user: "%"
+    read command
+    validate command
+    execute action
+    update file positions
+```
+
+### Design Patterns
+- **State Machine**: Tracks position in each file
+- **Command Pattern**: Each command has specific action
+- **REPL** (Read-Eval-Print Loop): Interactive cycle
+
+
+## 5. Temporary File Management
+
+### Concept
+When users choose to edit content, sdiff creates a temporary file, populates it with conflict content, launches an editor, then reads back the edited result.
+
+### Workflow
+```
+1. Create temp file (mkstemp for security)
+2. Write left/right content to temp file
+3. Launch editor with temp file path
+4. Wait for editor to complete
+5. Read edited content from temp file
+6. Write to output file
+7. Delete temp file
+```
+
+### Security Considerations
+- Uses `mkstemp()`: Creates file with unique name and secure permissions
+- Prevents race conditions (two processes creating same filename)
+- Tempfile is mode 0600 (readable/writable only by owner)
+- Cleanup in signal handlers prevents temp file leaks
+
+### Why Temporary Files
+- Editor needs a real file path (can't edit streams)
+- User needs to see context while editing
+- Preserves original files (non-destructive)
+
+
+## 6. Diff Protocol Communication
+
+### Concept
+sdiff and diff communicate via a simple text protocol over stdout/stdin pipes.
+
+### Protocol Format
+```
+i,leftlines,rightlines    # Identical lines
+c,leftlines,rightlines    # Changed lines (conflict)
+ message                  # Informational message
+```
+
+### Example
+```
+i,5,5          # Next 5 lines identical in both files
+c,3,2          # Conflict: 3 lines in left, 2 in right
+ Line content  # Display this to user
+```
+
+### Processing Flow
+```
+Read protocol command → Parse → Execute action:
+  - 'i': Copy identical lines automatically
+  - 'c': Present conflict to user for decision
+  - ' ': Display message
+```
+
+### Why This Design
+- Simple text-based protocol (easy to debug)
+- Line-oriented (natural for text files)
+- Extensible (can add new commands)
+- Language-agnostic (any program can implement)
+
+
+## 7. State Management Across File Positions
+
+### Concept
+Track current position in three different files simultaneously as processing progresses.
+
+### State Variables
+- **lline**: Current line number in left file
+- **rline**: Current line number in right file  
+- **llen**: Number of lines in current left chunk
+- **rlen**: Number of lines in current right chunk
+- **buffer positions**: Current position within buffers
+
+### State Transitions
+```
+Process chunk → Update positions → Move to next chunk
+  lline += llen
+  rline += rlen
+  bufpos advances through buffer
+```
+
+### Why Complex State Management
+- Files aren't processed sequentially (skip/copy operations)
+- User decisions affect what gets processed
+- Need to track position for error messages
+- Multiple buffers active simultaneously
+
+
+## 8. Error Handling and Exit Codes
+
+### Concept
+Unix programs communicate success/failure via exit codes, allowing shell scripts and other programs to react appropriately.
+
+### Exit Code Convention
+- **0**: Files are identical (success)
+- **1**: Files differ (normal difference, not an error)
+- **2**: Error occurred (trouble)
+
+### Error Categories
+1. **User Errors**: Invalid arguments, missing files
+2. **System Errors**: Can't open file, out of memory
+3. **Child Process Errors**: diff failed, editor crashed
+4. **Signal Interruption**: User cancelled operation
+
+### Error Propagation
+```
+Detect Error → Cleanup Resources → Report to User → Exit
+```
+
+### Why Exit Codes Matter
+- Allows automation and scripting
+- Distinguishes "different files" from "error"
+- Standard Unix convention
+- Enables error recovery in scripts
+
+
+## 9. Memory Management Strategy
+
+### Concept
+Efficient memory usage through fixed-size buffers and minimal allocations.
+
+### Strategies Applied
+
+**Fixed Buffer Allocation**
+- Allocate buffers once at startup
+- Reuse same buffer for entire program
+- Avoids repeated malloc/free overhead
+
+**Buffer Reuse Pattern**
+```
+buffer[BUFSIZE]
+  ↓
+Read chunk 1 → Process → Read chunk 2 → Process...
+(same buffer reused)
+```
+
+**Minimal String Copying**
+- Work with pointers into buffer
+- Only copy when necessary (output, temp files)
+- Use buffer positions instead of extracting substrings
+
+### Benefits
+- Predictable memory footprint
+- No memory leaks from repeated allocations
+- Better cache locality (same memory reused)
+- Handles arbitrarily large files with fixed memory
+
+
+## 10. Fork/Exec Pattern (Unix Process Creation)
+
+### Concept
+Unix creates new processes via fork (copy) then exec (replace).
+
+### Two-Step Process
+```
+1. fork(): Creates identical copy of current process
+   Parent: Returns child PID
+   Child: Returns 0
+
+2. exec(): Replaces child process with new program
+   Child becomes diff/editor program
+   Parent continues as sdiff
+```
+
+### Implementation Pattern
+```python
+pid = fork()
+if pid == 0:
+    # Child process
+    setup_child_environment()
+    exec(program, args)
+else:
+    # Parent process
+    wait_for_child(pid)
+```
+
+### Why This Pattern
+- Standard Unix way to create processes
+- Allows precise control of child environment
+- Parent can communicate via inherited file descriptors
+- Clean separation of processes
+
+
+## Key Takeaways
+
+1. **Buffering is critical** for performance with large files
+2. **Process separation** enables modularity and reuse
+3. **Signal handling** ensures clean shutdown
+4. **Interactive loops** provide user control
+5. **Temporary files** bridge editing and streaming
+6. **Simple protocols** enable inter-program communication
+7. **State tracking** manages complex multi-file operations
+8. **Exit codes** enable automation
+9. **Memory reuse** provides scalability
+10. **Fork/exec** is the Unix way of process management
+
+These concepts are fundamental to Unix system programming and appear in many similar utilities (merge, patch, vim's diff mode, git mergetool, etc.).

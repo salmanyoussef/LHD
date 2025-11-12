@@ -1,347 +1,282 @@
 #!/usr/bin/env python3
 """
-GNU sdiff - side-by-side merge of file differences
+sdiff - side-by-side merge of file differences
 
-Python implementation of the sdiff utility from GNU diffutils.
+Windows CMD compatible version with built-in diff algorithm.
+No external dependencies required.
 """
 
 import sys
 import os
-import signal
 import subprocess
 import tempfile
-import argparse
-import shutil
-from pathlib import Path
-from typing import Optional, List, BinaryIO, TextIO
+from typing import Optional, List, Tuple
+from difflib import SequenceMatcher
 
 # Constants
 PROGRAM_NAME = "sdiff"
 VERSION = "1.0.0"
-SDIFF_BUFSIZE = 65536
-DEFAULT_DIFF_PROGRAM = "diff"
-DEFAULT_EDITOR = os.environ.get("EDITOR", "vi")
+DEFAULT_WIDTH = 130
+DEFAULT_EDITOR = os.environ.get("EDITOR", "notepad.exe" if os.name == 'nt' else "vi")
 
 # Global state
 tmpname: Optional[str] = None
-tmp: Optional[TextIO] = None
-diffpid: Optional[int] = None
 suppress_common_lines = False
-signal_received: Optional[int] = None
-ignore_SIGINT = False
-sigs_trapped = False
 
 
-class LineFilter:
-    """Buffer for reading lines from a file"""
+class DiffResult:
+    """Represents a difference between two files"""
+    def __init__(self, tag: str, i1: int, i2: int, j1: int, j2: int):
+        self.tag = tag  # 'equal', 'replace', 'delete', 'insert'
+        self.i1 = i1
+        self.i2 = i2
+        self.j1 = j1
+        self.j2 = j2
     
-    def __init__(self, infile: BinaryIO):
-        self.infile = infile
-        self.buffer = bytearray()
-        self.bufpos = 0
+    def left_lines(self) -> int:
+        return self.i2 - self.i1
     
-    def refill(self) -> int:
-        """Fill buffer from input file"""
-        data = self.infile.read(SDIFF_BUFSIZE)
-        if data:
-            self.buffer = bytearray(data)
-            self.bufpos = 0
-            return len(data)
-        return 0
+    def right_lines(self) -> int:
+        return self.j2 - self.j1
+
+
+def compute_diff(file1_lines: List[str], file2_lines: List[str]) -> List[DiffResult]:
+    """Compute differences between two files using built-in difflib"""
+    matcher = SequenceMatcher(None, file1_lines, file2_lines)
+    results = []
     
-    def copy(self, lines: int, outfile: BinaryIO) -> None:
-        """Copy specified number of lines to output file"""
-        while lines > 0:
-            # Find newline
-            try:
-                newline_pos = self.buffer.index(b'\n', self.bufpos)
-                outfile.write(self.buffer[self.bufpos:newline_pos + 1])
-                self.bufpos = newline_pos + 1
-                lines -= 1
-            except ValueError:
-                # No newline in current buffer
-                outfile.write(self.buffer[self.bufpos:])
-                if not self.refill():
-                    return
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        results.append(DiffResult(tag, i1, i2, j1, j2))
     
-    def skip(self, lines: int) -> None:
-        """Skip specified number of lines"""
-        while lines > 0:
-            try:
-                newline_pos = self.buffer.index(b'\n', self.bufpos)
-                self.bufpos = newline_pos + 1
-                lines -= 1
-            except ValueError:
-                if not self.refill():
-                    break
+    return results
+
+
+def format_side_by_side(left_lines: List[str], right_lines: List[str], 
+                        diff: DiffResult, width: int) -> str:
+    """Format lines side-by-side for display"""
+    half_width = (width - 3) // 2
+    output = []
     
-    def snarf(self, max_size: int) -> Optional[str]:
-        """Read a line into string, return None on EOF"""
-        result = bytearray()
+    left_content = left_lines[diff.i1:diff.i2] if diff.i1 < diff.i2 else []
+    right_content = right_lines[diff.j1:diff.j2] if diff.j1 < diff.j2 else []
+    
+    max_lines = max(len(left_content), len(right_content))
+    
+    for i in range(max_lines):
+        left_line = left_content[i].rstrip('\n') if i < len(left_content) else ""
+        right_line = right_content[i].rstrip('\n') if i < len(right_content) else ""
         
-        while True:
-            try:
-                newline_pos = self.buffer.index(b'\n', self.bufpos)
-                line_data = self.buffer[self.bufpos:newline_pos]
-                
-                if len(result) + len(line_data) > max_size:
-                    return None
-                
-                result.extend(line_data)
-                self.bufpos = newline_pos + 1
-                return result.decode('utf-8', errors='replace')
-            except ValueError:
-                result.extend(self.buffer[self.bufpos:])
-                if not self.refill():
-                    return result.decode('utf-8', errors='replace') if result else None
-
-
-def cleanup(signo: Optional[int] = None) -> None:
-    """Clean up temporary files and processes"""
-    global diffpid, tmpname
+        # Truncate or pad left side
+        left_display = left_line[:half_width].ljust(half_width)
+        
+        # Determine separator
+        if diff.tag == 'equal':
+            separator = "   "
+        elif diff.tag == 'replace':
+            separator = " | "
+        elif diff.tag == 'delete':
+            separator = " < "
+        else:  # insert
+            separator = " > "
+        
+        # Truncate right side
+        right_display = right_line[:half_width]
+        
+        output.append(f"{left_display}{separator}{right_display}")
     
-    if diffpid and diffpid > 0:
-        try:
-            os.kill(diffpid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    
-    if tmpname and os.path.exists(tmpname):
-        try:
-            os.unlink(tmpname)
-        except OSError:
-            pass
-
-
-def signal_handler(signum: int, frame) -> None:
-    """Handle signals"""
-    global signal_received, ignore_SIGINT
-    
-    if not (signum == signal.SIGINT and ignore_SIGINT):
-        signal_received = signum
-
-
-def trap_signals() -> None:
-    """Set up signal handlers"""
-    global sigs_trapped
-    
-    signals_to_trap = [signal.SIGINT, signal.SIGTERM]
-    
-    if hasattr(signal, 'SIGHUP'):
-        signals_to_trap.append(signal.SIGHUP)
-    if hasattr(signal, 'SIGQUIT'):
-        signals_to_trap.append(signal.SIGQUIT)
-    
-    for sig in signals_to_trap:
-        signal.signal(sig, signal_handler)
-    
-    sigs_trapped = True
-
-
-def check_signals() -> None:
-    """Exit if a signal was received"""
-    if signal_received:
-        cleanup()
-        sys.exit(2)
+    return '\n'.join(output)
 
 
 def give_help() -> None:
     """Print help for interactive commands"""
     help_text = """
-ed:	Edit then use both versions, each decorated with a header.
-eb:	Edit then use both versions.
-el or e1:	Edit then use the left version.
-er or e2:	Edit then use the right version.
-e:	Discard both versions then edit a new one.
-l or 1:	Use the left version.
-r or 2:	Use the right version.
-s:	Silently include common lines.
-v:	Verbosely include common lines.
-q:	Quit.
+Commands:
+  l or 1    Use the left version
+  r or 2    Use the right version
+  e         Edit a new version
+  el or e1  Edit then use the left version
+  er or e2  Edit then use the right version
+  eb        Edit both versions
+  ed        Edit both versions with headers
+  s         Silent mode (suppress common lines)
+  v         Verbose mode (show common lines)
+  q         Quit
+  ?         Show this help
 """
-    print(help_text, file=sys.stderr)
+    print(help_text)
 
 
-def edit(left: LineFilter, lname: str, lline: int, llen: int,
-         right: LineFilter, rname: str, rline: int, rlen: int,
-         outfile: BinaryIO) -> bool:
-    """Handle interactive editing of differences"""
-    global tmpname, tmp, suppress_common_lines, ignore_SIGINT
+def edit_conflict(left_lines: List[str], lname: str, lstart: int,
+                 right_lines: List[str], rname: str, rstart: int,
+                 diff: DiffResult, cmd: str) -> Optional[str]:
+    """Handle interactive editing of a conflict"""
+    global tmpname
     
-    while True:
-        gotcmd = False
-        
-        while not gotcmd:
-            print("% ", end='', flush=True)
-            
-            try:
-                line = input().strip()
-            except EOFError:
-                return False
-            
-            if not line:
-                give_help()
-                continue
-            
-            cmd = line[0]
-            
-            # Handle two-character commands (e1, e2, eb, ed, el, er)
-            if cmd == 'e' and len(line) > 1:
-                cmd = cmd + line[1]
-            
-            if cmd in ['1', 'l', '2', 'r', 's', 'v', 'q'] or \
-               cmd in ['e', 'e1', 'e2', 'eb', 'ed', 'el', 'er']:
-                gotcmd = True
-            else:
-                give_help()
-        
-        # Execute command
-        if cmd in ['1', 'l']:
-            left.copy(llen, outfile)
-            right.skip(rlen)
-            return True
-        
-        elif cmd in ['2', 'r']:
-            right.copy(rlen, outfile)
-            left.skip(llen)
-            return True
-        
-        elif cmd == 's':
-            suppress_common_lines = True
-        
-        elif cmd == 'v':
-            suppress_common_lines = False
-        
-        elif cmd == 'q':
-            return False
-        
-        elif cmd in ['e', 'e1', 'e2', 'eb', 'ed', 'el', 'er']:
-            # Create temporary file
-            if tmpname:
-                tmp = open(tmpname, 'w')
-            else:
-                fd, tmpname = tempfile.mkstemp(prefix='sdiff')
-                tmp = os.fdopen(fd, 'w')
-            
-            # Write content based on command
-            if cmd in ['ed']:
-                if llen:
-                    if llen == 1:
-                        tmp.write(f"--- {lname} {lline}\n")
-                    else:
-                        tmp.write(f"--- {lname} {lline},{lline + llen - 1}\n")
-            
-            if cmd in ['e1', 'eb', 'el', 'ed']:
-                # Copy left content to temp file
-                left_data = bytearray()
-                for _ in range(llen):
-                    try:
-                        newline_pos = left.buffer.index(b'\n', left.bufpos)
-                        left_data.extend(left.buffer[left.bufpos:newline_pos + 1])
-                        left.bufpos = newline_pos + 1
-                    except ValueError:
-                        left.refill()
-                tmp.write(left_data.decode('utf-8', errors='replace'))
-            else:
-                left.skip(llen)
-            
-            if cmd in ['ed']:
-                if rlen:
-                    if rlen == 1:
-                        tmp.write(f"+++ {rname} {rline}\n")
-                    else:
-                        tmp.write(f"+++ {rname} {rline},{rline + rlen - 1}\n")
-            
-            if cmd in ['e2', 'eb', 'er', 'ed']:
-                # Copy right content to temp file
-                right_data = bytearray()
-                for _ in range(rlen):
-                    try:
-                        newline_pos = right.buffer.index(b'\n', right.bufpos)
-                        right_data.extend(right.buffer[right.bufpos:newline_pos + 1])
-                        right.bufpos = newline_pos + 1
-                    except ValueError:
-                        right.refill()
-                tmp.write(right_data.decode('utf-8', errors='replace'))
-            else:
-                right.skip(rlen)
-            
-            tmp.close()
-            
-            # Launch editor
-            ignore_SIGINT = True
-            check_signals()
-            
-            editor = os.environ.get('EDITOR', DEFAULT_EDITOR)
-            result = subprocess.run([editor, tmpname])
-            
-            ignore_SIGINT = False
-            
-            if result.returncode != 0:
-                print(f"Editor exited with status {result.returncode}", file=sys.stderr)
-            
-            # Copy edited content to output
-            with open(tmpname, 'rb') as tmp:
-                shutil.copyfileobj(tmp, outfile)
-            
-            return True
-
-
-def interact(diff: LineFilter, left: LineFilter, lname: str,
-             right: LineFilter, rname: str, outfile: BinaryIO) -> bool:
-    """Handle interactive merging"""
-    lline = 1
-    rline = 1
+    # Create temporary file
+    if not tmpname:
+        fd, tmpname = tempfile.mkstemp(prefix='sdiff_', suffix='.txt')
+        os.close(fd)
     
-    while True:
-        diff_help = diff.snarf(256)
+    with open(tmpname, 'w', encoding='utf-8') as tmp:
+        left_content = left_lines[diff.i1:diff.i2]
+        right_content = right_lines[diff.j1:diff.j2]
         
-        if diff_help is None:
-            return False
-        
-        if not diff_help:
-            return True
-        
-        check_signals()
-        
-        if diff_help[0] == ' ':
-            print(diff_help[1:])
-        else:
-            # Parse command: "c,llen,rlen" or "i,llen,rlen"
-            parts = diff_help.split(',')
-            if len(parts) != 3:
-                print(f"Invalid diff help: {diff_help}", file=sys.stderr)
-                return False
-            
-            cmd = parts[0][0]
-            llen = int(parts[1])
-            rlen = int(parts[2])
-            lenmax = max(llen, rlen)
-            
-            if cmd == 'i':
-                # Identical lines
-                if not suppress_common_lines:
-                    diff.copy(lenmax, sys.stdout.buffer)
+        # Write content based on command
+        if cmd in ['ed', 'e1', 'el']:
+            # Write left with optional header
+            if cmd == 'ed' and left_content:
+                if len(left_content) == 1:
+                    tmp.write(f"--- {lname} line {lstart + diff.i1 + 1}\n")
                 else:
-                    diff.skip(lenmax)
+                    tmp.write(f"--- {lname} lines {lstart + diff.i1 + 1}-{lstart + diff.i2}\n")
+            
+            for line in left_content:
+                tmp.write(line)
+                if not line.endswith('\n'):
+                    tmp.write('\n')
+        
+        if cmd in ['ed', 'e2', 'er']:
+            # Write right with optional header
+            if cmd == 'ed' and right_content:
+                if len(right_content) == 1:
+                    tmp.write(f"+++ {rname} line {rstart + diff.j1 + 1}\n")
+                else:
+                    tmp.write(f"+++ {rname} lines {rstart + diff.j1 + 1}-{rstart + diff.j2}\n")
+            
+            for line in right_content:
+                tmp.write(line)
+                if not line.endswith('\n'):
+                    tmp.write('\n')
+        
+        if cmd == 'eb':
+            # Write both versions
+            for line in left_content:
+                tmp.write(line)
+                if not line.endswith('\n'):
+                    tmp.write('\n')
+            for line in right_content:
+                tmp.write(line)
+                if not line.endswith('\n'):
+                    tmp.write('\n')
+    
+    # Launch editor
+    editor = os.environ.get('EDITOR', DEFAULT_EDITOR)
+    try:
+        subprocess.run([editor, tmpname], check=True)
+    except subprocess.CalledProcessError:
+        print(f"Warning: Editor exited with error", file=sys.stderr)
+    except FileNotFoundError:
+        print(f"Error: Editor '{editor}' not found", file=sys.stderr)
+        print(f"Set EDITOR environment variable or edit {tmpname} manually", file=sys.stderr)
+        input("Press Enter when done editing...")
+    
+    # Read edited content
+    try:
+        with open(tmpname, 'r', encoding='utf-8') as tmp:
+            return tmp.read()
+    except Exception as e:
+        print(f"Error reading edited file: {e}", file=sys.stderr)
+        return None
+
+
+def interactive_merge(left_lines: List[str], lname: str,
+                     right_lines: List[str], rname: str,
+                     diffs: List[DiffResult], width: int) -> Optional[str]:
+    """Perform interactive merge"""
+    global suppress_common_lines
+    
+    result = []
+    
+    for diff in diffs:
+        if diff.tag == 'equal':
+            # Identical lines
+            if not suppress_common_lines:
+                print(format_side_by_side(left_lines, right_lines, diff, width))
+            
+            # Add to result
+            for line in left_lines[diff.i1:diff.i2]:
+                result.append(line)
+        
+        else:
+            # Conflict - requires user decision
+            print("\n" + "=" * width)
+            print("CONFLICT:")
+            print(format_side_by_side(left_lines, right_lines, diff, width))
+            print("=" * width)
+            
+            # Get user command
+            while True:
+                try:
+                    cmd = input("\nChoice [l/r/e/el/er/eb/ed/s/v/q/?]: ").strip().lower()
+                except EOFError:
+                    return None
                 
-                left.copy(llen, outfile)
-                right.skip(rlen)
-            
-            elif cmd == 'c':
-                # Changed lines - interactive editing
-                diff.copy(lenmax, sys.stdout.buffer)
-                if not edit(left, lname, lline, llen,
-                           right, rname, rline, rlen, outfile):
-                    return False
-            
-            lline += llen
-            rline += rlen
+                if cmd in ['l', '1']:
+                    # Use left version
+                    for line in left_lines[diff.i1:diff.i2]:
+                        result.append(line)
+                    break
+                
+                elif cmd in ['r', '2']:
+                    # Use right version
+                    for line in right_lines[diff.j1:diff.j2]:
+                        result.append(line)
+                    break
+                
+                elif cmd == 's':
+                    suppress_common_lines = True
+                    print("Silent mode enabled")
+                    continue
+                
+                elif cmd == 'v':
+                    suppress_common_lines = False
+                    print("Verbose mode enabled")
+                    continue
+                
+                elif cmd == 'q':
+                    return None
+                
+                elif cmd in ['e', 'e1', 'el', 'e2', 'er', 'eb', 'ed']:
+                    edited = edit_conflict(left_lines, lname, 0,
+                                          right_lines, rname, 0,
+                                          diff, cmd)
+                    if edited is not None:
+                        result.append(edited)
+                        break
+                    else:
+                        print("Edit cancelled")
+                        continue
+                
+                elif cmd == '?':
+                    give_help()
+                    continue
+                
+                else:
+                    print("Invalid command. Type ? for help.")
+                    continue
+    
+    return ''.join(result)
+
+
+def simple_diff_display(left_lines: List[str], right_lines: List[str],
+                       diffs: List[DiffResult], width: int) -> None:
+    """Display differences without interaction"""
+    global suppress_common_lines
+    
+    for diff in diffs:
+        if diff.tag == 'equal' and suppress_common_lines:
+            continue
+        
+        output = format_side_by_side(left_lines, right_lines, diff, width)
+        if output:
+            print(output)
 
 
 def main() -> int:
     """Main entry point"""
-    global suppress_common_lines
+    global suppress_common_lines, tmpname
+    
+    import argparse
     
     parser = argparse.ArgumentParser(
         prog=PROGRAM_NAME,
@@ -353,20 +288,8 @@ def main() -> int:
     parser.add_argument('-o', '--output', help='Output file for interactive mode')
     parser.add_argument('-s', '--suppress-common-lines', action='store_true',
                        help='Do not output common lines')
-    parser.add_argument('-w', '--width', type=int, default=130,
-                       help='Output at most NUM print columns')
-    parser.add_argument('-l', '--left-column', action='store_true',
-                       help='Output only the left column of common lines')
-    parser.add_argument('-i', '--ignore-case', action='store_true',
-                       help='Ignore case differences')
-    parser.add_argument('-b', '--ignore-space-change', action='store_true',
-                       help='Ignore changes in whitespace')
-    parser.add_argument('-W', '--ignore-all-space', action='store_true',
-                       help='Ignore all whitespace')
-    parser.add_argument('-B', '--ignore-blank-lines', action='store_true',
-                       help='Ignore blank line changes')
-    parser.add_argument('-t', '--expand-tabs', action='store_true',
-                       help='Expand tabs to spaces')
+    parser.add_argument('-w', '--width', type=int, default=DEFAULT_WIDTH,
+                       help=f'Output width in columns (default: {DEFAULT_WIDTH})')
     parser.add_argument('-v', '--version', action='version',
                        version=f'{PROGRAM_NAME} {VERSION}')
     
@@ -374,77 +297,74 @@ def main() -> int:
     
     suppress_common_lines = args.suppress_common_lines
     
-    # Build diff command arguments
-    diff_args = [DEFAULT_DIFF_PROGRAM]
+    # Read input files
+    try:
+        with open(args.file1, 'r', encoding='utf-8', errors='replace') as f:
+            left_lines = f.readlines()
+    except Exception as e:
+        print(f"Error reading {args.file1}: {e}", file=sys.stderr)
+        return 2
     
-    if args.ignore_case:
-        diff_args.append('-i')
-    if args.ignore_space_change:
-        diff_args.append('-b')
-    if args.ignore_all_space:
-        diff_args.append('-w')
-    if args.ignore_blank_lines:
-        diff_args.append('-B')
-    if args.expand_tabs:
-        diff_args.append('-t')
-    if args.left_column:
-        diff_args.append('--left-column')
+    try:
+        with open(args.file2, 'r', encoding='utf-8', errors='replace') as f:
+            right_lines = f.readlines()
+    except Exception as e:
+        print(f"Error reading {args.file2}: {e}", file=sys.stderr)
+        return 2
     
-    if not args.output:
-        # Non-interactive mode - just run diff
-        if suppress_common_lines:
-            diff_args.append('--suppress-common-lines')
-        diff_args.extend(['-y', '-W', str(args.width), '--', args.file1, args.file2])
-        os.execvp(diff_args[0], diff_args)
-    else:
-        # Interactive mode
-        diff_args.extend(['--sdiff-merge-assist', '--', args.file1, args.file2])
-        
-        trap_signals()
-        
-        # Start diff process
-        diff_proc = subprocess.Popen(
-            diff_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        global diffpid
-        diffpid = diff_proc.pid
-        
-        # Open files
-        with open(args.file1, 'rb') as left_file, \
-             open(args.file2, 'rb') as right_file, \
-             open(args.output, 'wb') as out_file:
+    # Compute differences
+    diffs = compute_diff(left_lines, right_lines)
+    
+    # Check if files are identical
+    all_equal = all(d.tag == 'equal' for d in diffs)
+    
+    try:
+        if args.output:
+            # Interactive mode
+            result = interactive_merge(left_lines, args.file1,
+                                     right_lines, args.file2,
+                                     diffs, args.width)
             
-            diff_filter = LineFilter(diff_proc.stdout)
-            left_filter = LineFilter(left_file)
-            right_filter = LineFilter(right_file)
+            if result is None:
+                print("\nMerge cancelled", file=sys.stderr)
+                return 2
             
-            success = interact(diff_filter, left_filter, args.file1,
-                             right_filter, args.file2, out_file)
+            # Write output
+            try:
+                with open(args.output, 'w', encoding='utf-8') as f:
+                    f.write(result)
+                print(f"\nOutput written to {args.output}")
+            except Exception as e:
+                print(f"Error writing to {args.output}: {e}", file=sys.stderr)
+                return 2
         
-        # Wait for diff to complete
-        diff_proc.wait()
-        
+        else:
+            # Display-only mode
+            simple_diff_display(left_lines, right_lines, diffs, args.width)
+    
+    finally:
+        # Cleanup temp file
         if tmpname and os.path.exists(tmpname):
-            os.unlink(tmpname)
-        
-        if not success:
-            return 2
-        
-        return diff_proc.returncode if diff_proc.returncode <= 1 else 2
+            try:
+                os.unlink(tmpname)
+            except:
+                pass
     
-    return 0
+    # Return appropriate exit code
+    return 0 if all_equal else 1
 
 
 if __name__ == '__main__':
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        cleanup()
+        print("\nInterrupted", file=sys.stderr)
+        if tmpname and os.path.exists(tmpname):
+            try:
+                os.unlink(tmpname)
+            except:
+                pass
         sys.exit(2)
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
-        cleanup()
         sys.exit(2)

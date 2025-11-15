@@ -1,54 +1,73 @@
+# W_BEST_LINE simplified version with clear normalizaion output style
+
 import argparse, re
 from pathlib import Path
 from difflib import SequenceMatcher
 
 def norm(s: str) -> str:
+    """Normalize by trimming, lowering, and collapsing spaces."""
     return re.sub(r"\s+", " ", s.strip().lower())
 
 def sim(a: str, b: str) -> float:
+    """Compute similarity using difflib ratio."""
     return SequenceMatcher(None, norm(a), norm(b)).ratio()
 
 def best_line_map(old_lines, new_lines, threshold=0.75, monotone=True):
-    mapping = []            # (old_idx, new_idx or -1, score or None)
-    j_start = 0             # enforce monotone left→right matches in new
+    mapping = []
     used = set()
+    j_start = 0
 
     for i, old in enumerate(old_lines, 1):
         best_j, best_s = -1, 0.0
-        rng = range(j_start, len(new_lines)) if monotone else range(0, len(new_lines))
+        rng = range(j_start, len(new_lines)) if monotone else range(len(new_lines))
         for j in rng:
-            if j in used: 
+            if j in used:
                 continue
             s = sim(old, new_lines[j])
             if s > best_s:
                 best_s, best_j = s, j
         if best_s >= threshold:
-            mapping.append((i, best_j+1, round(best_s, 3)))
+            mapping.append((i, best_j + 1))
             used.add(best_j)
             if monotone:
                 j_start = best_j + 1
         else:
-            mapping.append((i, -1, None))  # treat as DELETED (no good match)
-    return mapping
+            mapping.append((i, -1))
+    return mapping, used
 
 def main():
-    ap = argparse.ArgumentParser(description="W_BEST_LINE-style line mapper (TXT out)")
+    ap = argparse.ArgumentParser(description="W_BEST_LINE mapping tool (clean style)")
     ap.add_argument("old_file", type=Path)
     ap.add_argument("new_file", type=Path)
     ap.add_argument("--out", type=Path, default=Path("mapping.txt"))
     ap.add_argument("--threshold", type=float, default=0.75)
-    ap.add_argument("--no-monotone", action="store_true", help="disable order constraint")
     args = ap.parse_args()
 
     old_lines = args.old_file.read_text(encoding="utf-8", errors="replace").splitlines()
     new_lines = args.new_file.read_text(encoding="utf-8", errors="replace").splitlines()
 
-    mapping = best_line_map(old_lines, new_lines, threshold=args.threshold, monotone=not args.no_monotone)
+    mapping, used_new = best_line_map(old_lines, new_lines, threshold=args.threshold)
 
     with args.out.open("w", encoding="utf-8") as f:
-        f.write("# old_line -> new_line  score   (new_line=- means DELETED)\n")
-        for i, j, s in mapping:
-            f.write(f"{i:>5} -> {('-' if j==-1 else j):<5}  {'' if s is None else s}\n")
+        for i, j in mapping:
+            if j != -1:
+                f.write(f"{i} -> {j}\n")
+
+        # Unmatched deletions (old lines that didn't map)
+        deleted = [i for i, j in mapping if j == -1]
+        if deleted:
+            f.write("\n# Unmatched deletions (only in OLD file):\n")
+            for i in deleted:
+                f.write(f"OLD {i}\n")
+
+        # Unmatched additions (new lines that weren’t used)
+        new_only = [j+1 for j in range(len(new_lines)) if j not in used_new]
+        if new_only:
+            f.write("\n# Unmatched additions (only in NEW file):\n")
+            for j in new_only:
+                f.write(f"NEW {j}\n")
+
+    print(f"✅ Mapping saved to {args.out}")
 
 if __name__ == "__main__":
     main()

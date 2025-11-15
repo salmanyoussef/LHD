@@ -5,13 +5,14 @@ ldiff.py  —  Rough re-implementation of ldiff (Canfora–Cerulo–Di Penta)
 Given two versions of a file, outputs a sequence of line mappings:
     old_line_number -> new_line_number
 
-Optionally, with --show-unmatched, also prints pure additions/deletions.
+It ALWAYS also prints:
+  - unmatched deletions (lines only in OLD file)
+  - unmatched additions (lines only in NEW file)
 """
 
 import sys
 import math
 import difflib
-import argparse
 from collections import Counter
 from typing import List, Tuple, Dict
 
@@ -197,28 +198,18 @@ def ldiff(
 
 # -------------------------- CLI wrapper ---------------------------- #
 
-def parse_args(argv: List[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="ldiff-style line matcher: OLD_FILE NEW_FILE"
-    )
-    parser.add_argument("old_file", help="Path to old version")
-    parser.add_argument("new_file", help="Path to new version")
-    parser.add_argument(
-        "--show-unmatched",
-        action="store_true",
-        help="Also print pure additions and deletions"
-    )
-    return parser.parse_args(argv[1:])
-
-
 def main(argv: List[str]) -> None:
-    # Backwards compatible: if user didn't use flags, still OK.
-    args = parse_args(argv)
+    if len(argv) != 3:
+        print(f"Usage: {argv[0]} OLD_FILE NEW_FILE", file=sys.stderr)
+        sys.exit(1)
 
-    with open(args.old_file, "r", encoding="utf-8", errors="replace") as f:
+    old_path = argv[1]
+    new_path = argv[2]
+
+    with open(old_path, "r", encoding="utf-8", errors="replace") as f:
         old_lines = [line.rstrip("\n") for line in f]
 
-    with open(args.new_file, "r", encoding="utf-8", errors="replace") as f:
+    with open(new_path, "r", encoding="utf-8", errors="replace") as f:
         new_lines = [line.rstrip("\n") for line in f]
 
     mapping = ldiff(old_lines, new_lines)
@@ -228,24 +219,23 @@ def main(argv: List[str]) -> None:
         new_idx = mapping[old_idx]
         print(f"{old_idx + 1} -> {new_idx + 1}")
 
-    if args.show_unmatched:
-        old_line_count = len(old_lines)
-        new_line_count = len(new_lines)
-        mapped_old = set(mapping.keys())
-        mapped_new = set(mapping.values())
+    # ----- Always show unmatched lines -----
+    old_line_count = len(old_lines)
+    new_line_count = len(new_lines)
+    mapped_old = set(mapping.keys())
+    mapped_new = set(mapping.values())
 
-        # Unmatched deletions: lines only in old file
-        deletions = [i for i in range(old_line_count) if i not in mapped_old]
-        additions = [j for j in range(new_line_count) if j not in mapped_new]
+    deletions = [i for i in range(old_line_count) if i not in mapped_old]
+    additions = [j for j in range(new_line_count) if j not in mapped_new]
 
-        if deletions:
-            print("\n# Unmatched deletions (only in OLD file):")
-            for i in deletions:
-                print(f"OLD {i + 1}")
-        if additions:
-            print("\n# Unmatched additions (only in NEW file):")
-            for j in additions:
-                print(f"NEW {j + 1}")
+    if deletions:
+        print("\n# Unmatched deletions (only in OLD file):")
+        for i in deletions:
+            print(f"OLD {i + 1}")
+    if additions:
+        print("\n# Unmatched additions (only in NEW file):")
+        for j in additions:
+            print(f"NEW {j + 1}")
 
 
 if __name__ == "__main__":

@@ -221,14 +221,3 @@ OLD 2
 # Unmatched additions (only in NEW file):
 NEW 3
 ```
-
----
-
-# **10. Possible Extensions**
-- Add JSON output  
-- Add syntax-aware diff  
-- Add movement detection  
-- Add colorized terminal output  
-
----
-

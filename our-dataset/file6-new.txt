@@ -1,1 +1,19 @@
+def compute_average(values):
+    s = 0
+    for v in values:
+        s += v
+    return s / len(values)
+
+def grade_for(avg):
+    if avg >= 90: return 'A'
+    if avg >= 80: return 'B'
+    if avg >= 70: return 'C'
+    return 'D'
+
+scores = [82, 91, 77, 88]
+avg = compute_average(scores)
+g = grade_for(avg)
+
+print("Average:", avg)
+print("Grade:", g)
 

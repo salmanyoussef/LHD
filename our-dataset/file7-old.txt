@@ -1,1 +1,12 @@
+text = "hello world hello program"
+words = text.split()
+freq = {}
+
+for w in words:
+    if w not in freq:
+        freq[w] = 1
+    else:
+        freq[w] += 1
+
+print(freq)
 

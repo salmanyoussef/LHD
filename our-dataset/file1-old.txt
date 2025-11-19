@@ -1,17 +1,11 @@
-def add(a, b):
-    return a + b
-
-def multiply(a, b):
-    return a * b
-
-def greet(name):
-    print("Hello " + name)
-
-def main():
-    x = add(5, 10)
-    y = multiply(x, 2)
-    greet("Alice")
-    print("Result:", y)
-
-if __name__ == "__main__":
-    main()
+public class StatsExample {
+    public static void main(String[] args) {
+        int[] values = new int[] {10, 20, 30, 40};
+        int sum = 0;
+        for (int v : values) {
+            sum += v;
+        }
+        double avg = sum / (double) values.length;
+        System.out.println("Average: " + avg);
+    }
+}

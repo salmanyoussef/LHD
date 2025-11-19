@@ -1,0 +1,13 @@
+# Demo Tool
+
+This tool processes log files and prints basic statistics.
+
+## Usage
+
+- Run `demo-tool input.log`
+- Check the summary printed at the end of the run.
+- Use the `--verbose` flag for more details.
+
+## Notes
+
+The tool is experimental and provided as-is.

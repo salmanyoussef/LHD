@@ -1,0 +1,29 @@
+#include <stdio.h>
+#include <string.h>
+
+int count_lines(FILE *fp) {
+    int count = 0;
+    int ch;
+    while ((ch = fgetc(fp)) != EOF) {
+        if (ch == '\n') {
+            count++;
+        }
+    }
+    return count;
+}
+
+int main(int argc, char **argv) {
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <file>\n", argv[0]);
+        return 1;
+    }
+    FILE *fp = fopen(argv[1], "r");
+    if (!fp) {
+        perror("fopen");
+        return 1;
+    }
+    int lines = count_lines(fp);
+    printf("lines: %d\n", lines);
+    fclose(fp);
+    return 0;
+}

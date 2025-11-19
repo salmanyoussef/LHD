@@ -1,1 +1,13 @@
+def evens_only(values):
+    return [x for x in values if x % 2 == 0]
+
+def square_all(values):
+    out = []
+    for v in values:
+        out.append(v * v)
+    return out
+
+nums = [1, 2, 3, 4, 5, 6]
+result = square_all(evens_only(nums))
+print(result)
 

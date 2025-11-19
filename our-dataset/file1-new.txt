@@ -1,19 +1,18 @@
-def add(a, b):
-    # simple addition
-    return a + b
+public class StatsExample {
+    public static double average(int[] values) {
+        if (values == null || values.length == 0) {
+            throw new IllegalArgumentException("values must not be empty");
+        }
+        int sum = 0;
+        for (int v : values) {
+            sum += v;
+        }
+        return sum / (double) values.length;
+    }
 
-def multiply(a, b):
-    result = a * b
-    return result
-
-def greet_user(username):
-    print("Hello,", username + "!")
-
-def main():
-    x = add(5, 10)
-    y = multiply(x, 3)
-    greet_user("Alice")
-    print("Final result:", y)
-
-if __name__ == "__main__":
-    main()
+    public static void main(String[] args) {
+        int[] values = new int[] {10, 20, 30, 40};
+        double avg = average(values);
+        System.out.println("Average: " + avg);
+    }
+}

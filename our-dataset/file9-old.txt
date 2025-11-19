@@ -1,1 +1,12 @@
+items = {"apple": 4, "banana": 2, "pear": 9}
+pairs = list(items.items())
+
+for i in range(len(pairs)):
+    for j in range(i + 1, len(pairs)):
+        if pairs[j][1] < pairs[i][1]:
+            temp = pairs[i]
+            pairs[i] = pairs[j]
+            pairs[j] = temp
+
+print(pairs)
 

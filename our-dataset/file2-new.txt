@@ -1,0 +1,11 @@
+def load_config(path):
+    with open(path) as f:
+        data = f.read()
+    return data
+
+def main():
+    raw = load_config("settings.yml")
+    print("Loaded:\n" + raw)
+
+if __name__ == "__main__":
+    main()

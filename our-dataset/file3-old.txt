@@ -1,0 +1,7 @@
+{
+  "host": "localhost",
+  "port": 8080,
+  "use_tls": false,
+  "log_level": "INFO",
+  "welcome_message": "Welcome to our demo server. Please read the documentation before using this API."
+}

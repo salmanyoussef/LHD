@@ -1,0 +1,14 @@
+# Demo Tool
+
+This tool processes log files
+and prints basic statistics.
+
+## Usage
+
+- Run `demo-tool input.log` and check the summary at the end of the run.
+- Use the `--verbose` flag for more details.
+- Use the `--output report.json` flag to write a JSON report.
+
+## Notes
+
+The tool is experimental and provided as-is.

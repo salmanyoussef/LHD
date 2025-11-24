@@ -1,3 +1,24 @@
-The sky was clear today.
-Birds were flying over the fields.
-It felt peaceful, almost unreal.
+import json
+
+def read_file(path):
+    f = open(path)
+    try:
+        content = f.read()
+    finally:
+        f.close()
+    return content
+
+def parse_json(text):
+    try:
+        return json.loads(text)
+    except:
+        return {}
+
+def main():
+    raw = read_file("data.json")
+    parsed = parse_json(raw)
+    print("Parsed:")
+    print(parsed)
+
+if __name__ == "__main__":
+    main()

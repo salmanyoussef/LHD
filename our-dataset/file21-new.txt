@@ -1,4 +1,19 @@
-The sky was bright today.
-Birds were flying over the wide fields.
-A quiet breeze passed by.
-It felt peaceful, almost unreal.
+import json
+
+def read_file(path):
+    with open(path) as f:
+        return f.read()
+
+def parse_json(text):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+
+def main():
+    raw = read_file("data.json")
+    parsed = parse_json(raw)
+    print("Parsed:", parsed)
+
+if __name__ == "__main__":
+    main()

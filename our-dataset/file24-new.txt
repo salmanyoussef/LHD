@@ -1,0 +1,17 @@
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+public class Loader {
+    public static String load(String path) {
+        try {
+            return Files.readString(Path.of(path));
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    public static void main(String[] args) {
+        String result = load("input.txt");
+        System.out.println("Loaded:\n" + result);
+    }
+}

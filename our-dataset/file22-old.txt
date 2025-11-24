@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "enabled": true,
+  "paths": ["src", "lib"],
+  "retry_limit": 3,
+  "debug": false,
+  "notes": "This configuration controls the basic startup options."
+}

@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "enabled": true,
+  "paths": ["src", "lib", "tests"],
+  "retry_limit": 5,
+  "debug": true,
+  "notes": "This configuration controls the basic startup options.",
+  "extra": "Added new fields for extended support."
+}

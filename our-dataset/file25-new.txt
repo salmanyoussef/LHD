@@ -1,0 +1,18 @@
+import math
+
+def circle_area(r):
+    return math.pi * (r ** 2)
+
+def circle_perimeter(r):
+    return 2 * math.pi * r
+
+def describe_circle(r):
+    area = circle_area(r)
+    perimeter = circle_perimeter(r)
+    return f"Circle radius={r}, area={area}, perimeter={perimeter}"
+
+def main():
+    print(describe_circle(5))
+
+if __name__ == "__main__":
+    main()

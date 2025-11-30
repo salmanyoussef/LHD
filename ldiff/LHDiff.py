@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""
+lhdiff.py — LHDiff-style line matcher
+
+Given two versions of a file, outputs a sequence of line mappings:
+    old_line_number -> new_line_number[,new_line_number,...]
+
+Optionally, with --show-unmatched, also prints pure additions/deletions.
+
+Implements a language-independent, hybrid content + context matcher:
+- Step 1: Preprocessing / normalization
+- Step 2: Detect unchanged lines via diff
+- Step 3: Generate candidate set using SimHash (content + context)
+- Step 4: Resolve conflicts using real similarity
+- Step 5: Detect line splits (one old line -> several new lines)
+"""
+
+import sys
+import math
+import difflib
+import argparse
+from collections import Counter
+from typing import List, Tuple, Dict
+
+# ---------------------- Tunable Parameters ------------------------- #
+
+SIMHASH_BITS = 64           # length of simhash
+CANDIDATES_PER_LINE = 15    # k in the slides
+MAIN_SIM_THRESHOLD = 0.4    # min combined similarity to accept main match
+SPLIT_SIM_THRESHOLD = 0.35  # min combined similarity to keep extra split lines
+CONTEXT_WINDOW = 4          # top/bottom lines for context
+
+
+# ---------------------- Basic Helpers ------------------------------ #
+
+def normalize_line(s: str) -> str:
+    """
+    Simple normalization: strip, lowercase, collapse internal whitespace.
+    You can extend this to remove comments, etc., if desired.
+    """
+    s = s.strip().lower()
+    parts = s.split()
+    return " ".join(parts)
+
+
+def tokenize(s: str) -> List[str]:
+    """
+    Tokenize a string into alphanumeric + '_' tokens.
+    """
+    tokens: List[str] = []
+    token = ""
+    for ch in s:
+        if ch.isalnum() or ch == "_":
+            token += ch
+        else:
+            if token:
+                tokens.append(token)
+                token = ""
+    if token:
+        tokens.append(token)
+    return tokens
+
+
+def get_context_window(lines: List[str], idx: int, window: int = CONTEXT_WINDOW) -> List[str]:
+    """
+    Get up to `window` lines above and below the given index (excluding the line itself).
+    """
+    start = max(0, idx - window)
+    end = min(len(lines), idx + window + 1)
+    return [lines[i] for i in range(start, end) if i != idx]
+
+
+# ---------------------- Cosine Similarity -------------------------- #
+
+def cosine_similarity(vec1: Dict[str, float], vec2: Dict[str, float]) -> float:
+    if not vec1 or not vec2:
+        return 0.0
+    # Use smaller dict for iteration
+    if len(vec1) < len(vec2):
+        smaller, larger = vec1, vec2
+    else:
+        smaller, larger = vec2, vec1
+
+    dot = 0.0
+    for t, w in smaller.items():
+        w2 = larger.get(t)
+        if w2 is not None:
+            dot += w * w2
+
+    norm1 = math.sqrt(sum(w * w for w in vec1.values()))
+    norm2 = math.sqrt(sum(w * w for w in vec2.values()))
+    if norm1 == 0.0 or norm2 == 0.0:
+        return 0.0
+    return dot / (norm1 * norm2)
+
+
+def context_vector(norm_lines: List[str], idx: int) -> Dict[str, float]:
+    """
+    Build a simple TF vector of the context window around a line.
+    (No IDF needed for local context.)
+    """
+    ctx_text = " ".join(get_context_window(norm_lines, idx))
+    tokens = tokenize(ctx_text)
+    if not tokens:
+        return {}
+    tf = Counter(tokens)
+    return {t: float(c) for t, c in tf.items()}
+
+
+# ---------------- Normalized Levenshtein Distance ------------------ #
+
+def normalized_levenshtein(s1: str, s2: str) -> float:
+    """
+    Returns Levenshtein distance normalized to [0,1] by max(len(s1), len(s2)).
+    """
+    if s1 == s2:
+        return 0.0
+    if not s1 or not s2:
+        return 1.0
+
+    len1, len2 = len(s1), len(s2)
+    prev = list(range(len2 + 1))
+    curr = [0] * (len2 + 1)
+
+    for i in range(1, len1 + 1):
+        curr[0] = i
+        c1 = s1[i - 1]
+        for j in range(1, len2 + 1):
+            cost = 0 if c1 == s2[j - 1] else 1
+            curr[j] = min(
+                prev[j] + 1,      # deletion
+                curr[j - 1] + 1,  # insertion
+                prev[j - 1] + cost  # substitution
+            )
+        prev, curr = curr, prev
+
+    ld = prev[len2]
+    return ld / float(max(len1, len2))
+
+
+# ------------------------- SimHash --------------------------------- #
+
+def simhash(tokens: List[str], bits: int = SIMHASH_BITS) -> int:
+    """
+    Simple SimHash over a list of tokens.
+    """
+    if not tokens:
+        return 0
+    v = [0] * bits
+    for token in tokens:
+        h = hash(token)
+        for i in range(bits):
+            bit = (h >> i) & 1
+            v[i] += 1 if bit else -1
+    result = 0
+    for i in range(bits):
+        if v[i] > 0:
+            result |= (1 << i)
+    return result
+
+
+def hamming_distance(a: int, b: int) -> int:
+    """
+    Hamming distance between two bit-vectors represented as ints.
+    """
+    x = a ^ b
+    count = 0
+    while x:
+        x &= x - 1
+        count += 1
+    return count
+
+
+def build_line_signatures(norm_lines: List[str], bits: int = SIMHASH_BITS) -> Tuple[List[int], List[int]]:
+    """
+    For each line, build:
+    - content SimHash (based on tokens from the line)
+    - context SimHash (based on tokens from top/bottom context)
+    """
+    content_hashes: List[int] = []
+    context_hashes: List[int] = []
+
+    for i in range(len(norm_lines)):
+        content_tokens = tokenize(norm_lines[i])
+        context_tokens = tokenize(" ".join(get_context_window(norm_lines, i)))
+        content_hashes.append(simhash(content_tokens, bits))
+        context_hashes.append(simhash(context_tokens, bits))
+
+    return content_hashes, context_hashes
+
+
+def get_candidates_for_line(
+    del_idx: int,
+    add_indices: List[int],
+    old_content_hash: List[int],
+    old_context_hash: List[int],
+    new_content_hash: List[int],
+    new_context_hash: List[int],
+    k: int = CANDIDATES_PER_LINE,
+    bits: int = SIMHASH_BITS
+) -> List[int]:
+    """
+    For a given deleted-line index, return up to k candidate new-line indices,
+    ranked by combined SimHash similarity (content + context).
+    """
+    c_hash = old_content_hash[del_idx]
+    ctx_hash = old_context_hash[del_idx]
+    scores = []
+
+    for j in add_indices:
+        c2 = new_content_hash[j]
+        ctx2 = new_context_hash[j]
+
+        hd_c = hamming_distance(c_hash, c2)
+        hd_ctx = hamming_distance(ctx_hash, ctx2)
+        sim_c = 1.0 - hd_c / float(bits)
+        sim_ctx = 1.0 - hd_ctx / float(bits)
+        combined = 0.6 * sim_c + 0.4 * sim_ctx
+        scores.append((combined, j))
+
+    scores.sort(reverse=True, key=lambda x: x[0])
+    return [j for (score, j) in scores[:k]]
+
+
+# ----------------------- Line Split Detection ---------------------- #
+
+def detect_line_split(
+    old_idx: int,
+    first_new_idx: int,
+    old_norm: List[str],
+    new_norm: List[str],
+    max_span: int = 4
+) -> List[int]:
+    """
+    Try to extend mapping old_idx -> [first_new_idx, ...]
+    while the normalized Levenshtein distance between the old line
+    and the concatenation of new lines keeps decreasing.
+
+    Returns a list of new line indices (at least [first_new_idx]).
+    """
+    base = old_norm[old_idx]
+    best_indices = [first_new_idx]
+    best_dist = normalized_levenshtein(base, new_norm[first_new_idx])
+
+    cur_indices = list(best_indices)
+    for step in range(1, max_span):
+        next_idx = first_new_idx + step
+        if next_idx >= len(new_norm):
+            break
+        cur_indices.append(next_idx)
+        combined_text = " ".join(new_norm[k] for k in cur_indices)
+        d = normalized_levenshtein(base, combined_text)
+        if d < best_dist:
+            best_dist = d
+            best_indices = list(cur_indices)
+        else:
+            # similarity decreased; stop extending
+            break
+
+    return best_indices
+
+
+# ---------------------- Main LHDiff Procedure ---------------------- #
+
+def lhdiff(
+    old_lines: List[str],
+    new_lines: List[str]
+) -> Dict[int, List[int]]:
+    """
+    Core LHDiff-style algorithm.
+
+    Returns a mapping:
+        old_line_index (0-based) -> list of new_line_indices (0-based)
+    """
+    # Step 1: normalization
+    old_norm = [normalize_line(s) for s in old_lines]
+    new_norm = [normalize_line(s) for s in new_lines]
+
+    # Step 2: detect unchanged lines via diff on normalized content
+    sm = difflib.SequenceMatcher(None, old_norm, new_norm)
+    opcodes = sm.get_opcodes()
+
+    mapping: Dict[int, List[int]] = {}
+
+    deletion_indices: List[int] = []
+    addition_indices: List[int] = []
+
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            # directly map unchanged lines (one-to-one)
+            for offset in range(i2 - i1):
+                old_idx = i1 + offset
+                new_idx = j1 + offset
+                mapping[old_idx] = [new_idx]
+        else:
+            # collect all deletion and insertion line indices
+            if tag in ("delete", "replace") and i1 != i2:
+                deletion_indices.extend(range(i1, i2))
+            if tag in ("insert", "replace") and j1 != j2:
+                addition_indices.extend(range(j1, j2))
+
+    # If nothing to match, we're done
+    if not deletion_indices or not addition_indices:
+        return mapping
+
+    # Step 3: build signatures and context vectors
+    old_content_hash, old_context_hash = build_line_signatures(old_norm)
+    new_content_hash, new_context_hash = build_line_signatures(new_norm)
+
+    old_ctx_vecs = [context_vector(old_norm, i) for i in range(len(old_norm))]
+    new_ctx_vecs = [context_vector(new_norm, j) for j in range(len(new_norm))]
+
+    # Track which new line is "owned" by which old line (for conflict resolution)
+    # new_line_owner[new_idx] = (old_idx, similarity_score)
+    new_line_owner: Dict[int, Tuple[int, float]] = {}
+
+    # Initialize ownership for equal lines as perfect matches
+    for old_idx, new_list in mapping.items():
+        for new_idx in new_list:
+            new_line_owner[new_idx] = (old_idx, 1.0)
+
+    # Step 4 & 5: handle changed (deleted) lines using candidates + split detection
+    for i in deletion_indices:
+        # skip lines already matched as equal
+        if i in mapping:
+            continue
+
+        candidates = get_candidates_for_line(
+            i,
+            addition_indices,
+            old_content_hash,
+            old_context_hash,
+            new_content_hash,
+            new_context_hash,
+            k=CANDIDATES_PER_LINE,
+            bits=SIMHASH_BITS
+        )
+        if not candidates:
+            continue
+
+        # Find best candidate using combined similarity
+        best_j = None
+        best_score = 0.0
+
+        for j in candidates:
+            content_sim = 1.0 - normalized_levenshtein(old_norm[i], new_norm[j])
+            ctx_sim = cosine_similarity(old_ctx_vecs[i], new_ctx_vecs[j])
+            combined = 0.6 * content_sim + 0.4 * ctx_sim
+            if combined > best_score:
+                best_score = combined
+                best_j = j
+
+        # Apply main similarity threshold
+        if best_j is None or best_score < MAIN_SIM_THRESHOLD:
+            continue
+
+        # Conflict resolution: if some other old line already owns best_j
+        owner = new_line_owner.get(best_j)
+        if owner is not None:
+            owner_old, owner_score = owner
+            if best_score <= owner_score:
+                # existing mapping is better; skip this line
+                continue
+            else:
+                # steal mapping: remove best_j from the previous owner
+                if owner_old in mapping:
+                    mapping[owner_old] = [k for k in mapping[owner_old] if k != best_j]
+                    if not mapping[owner_old]:
+                        del mapping[owner_old]
+
+        # Step 5: line split detection (extend to multiple consecutive new lines)
+        split_indices = detect_line_split(i, best_j, old_norm, new_norm)
+
+        final_new_indices: List[int] = []
+        for j in split_indices:
+            # Compute per-line similarity to compare with existing owners
+            content_sim = 1.0 - normalized_levenshtein(old_norm[i], new_norm[j])
+            ctx_sim = cosine_similarity(old_ctx_vecs[i], new_ctx_vecs[j])
+            combined = 0.6 * content_sim + 0.4 * ctx_sim
+
+            # Slightly lower threshold for additional split lines
+            if combined < SPLIT_SIM_THRESHOLD:
+                continue
+
+            existing = new_line_owner.get(j)
+            if existing is not None:
+                owner_old, owner_score = existing
+                if combined <= owner_score:
+                    # someone else has a better claim
+                    continue
+                else:
+                    # reassign from previous owner
+                    if owner_old in mapping:
+                        mapping[owner_old] = [k for k in mapping[owner_old] if k != j]
+                        if not mapping[owner_old]:
+                            del mapping[owner_old]
+
+            final_new_indices.append(j)
+            new_line_owner[j] = (i, combined)
+
+        if final_new_indices:
+            # Store sorted new indices for nicer output
+            mapping[i] = sorted(final_new_indices)
+
+    return mapping
+
+
+# -------------------------- CLI wrapper ---------------------------- #
+
+def parse_args(argv: List[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="LHDiff-style line matcher: OLD_FILE NEW_FILE"
+    )
+    parser.add_argument("old_file", help="Path to old version")
+    parser.add_argument("new_file", help="Path to new version")
+    parser.add_argument(
+        "--show-unmatched",
+        action="store_true",
+        help="Also print pure additions and deletions"
+    )
+    return parser.parse_args(argv[1:])
+
+
+def main(argv: List[str]) -> None:
+    args = parse_args(argv)
+
+    with open(args.old_file, "r", encoding="utf-8", errors="replace") as f:
+        old_lines = [line.rstrip("\n") for line in f]
+
+    with open(args.new_file, "r", encoding="utf-8", errors="replace") as f:
+        new_lines = [line.rstrip("\n") for line in f]
+
+    mapping = lhdiff(old_lines, new_lines)
+
+    # ----- Print mappings (old_idx -> new_idx[,new_idx,...]) -----
+    for old_idx in sorted(mapping.keys()):
+        new_idxs = mapping[old_idx]
+        new_str = ",".join(str(j + 1) for j in new_idxs)
+        print(f"{old_idx + 1} -> {new_str}")
+
+    if args.show_unmatched:
+        old_line_count = len(old_lines)
+        new_line_count = len(new_lines)
+
+        mapped_old = set(mapping.keys())
+        mapped_new: set[int] = set()
+        for new_list in mapping.values():
+            mapped_new.update(new_list)
+
+        deletions = [i for i in range(old_line_count) if i not in mapped_old]
+        additions = [j for j in range(new_line_count) if j not in mapped_new]
+
+        if deletions:
+            print("\n# Unmatched deletions (only in OLD file):")
+            for i in deletions:
+                print(f"OLD {i + 1}")
+        if additions:
+            print("\n# Unmatched additions (only in NEW file):")
+            for j in additions:
+                print(f"NEW {j + 1}")
+
+
+if __name__ == "__main__":
+    main(sys.argv)
+

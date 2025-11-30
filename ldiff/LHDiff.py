@@ -18,6 +18,11 @@ def normalize_line(s: str) -> str:
     return " ".join(parts)
 
 
+def is_blank(norm_line: str) -> bool:
+    """Return True if a normalized line is empty/whitespace only."""
+    return norm_line.strip() == ""
+
+
 def tokenize(s: str) -> List[str]:
     tokens: List[str] = []
     token = ""
@@ -37,6 +42,7 @@ def get_context_window(lines: List[str], idx: int, window: int = CONTEXT_WINDOW)
     start = max(0, idx - window)
     end = min(len(lines), idx + window + 1)
     return [lines[i] for i in range(start, end) if i != idx]
+
 
 def cosine_similarity(vec1: Dict[str, float], vec2: Dict[str, float]) -> float:
     if not vec1 or not vec2:
@@ -68,6 +74,7 @@ def context_vector(norm_lines: List[str], idx: int) -> Dict[str, float]:
     tf = Counter(tokens)
     return {t: float(c) for t, c in tf.items()}
 
+
 def normalized_levenshtein(s1: str, s2: str) -> float:
     if s1 == s2:
         return 0.0
@@ -92,6 +99,7 @@ def normalized_levenshtein(s1: str, s2: str) -> float:
 
     ld = prev[len2]
     return ld / float(max(len1, len2))
+
 
 def simhash(tokens: List[str], bits: int = SIMHASH_BITS) -> int:
     if not tokens:
@@ -159,6 +167,7 @@ def get_candidates_for_line(
     scores.sort(reverse=True, key=lambda x: x[0])
     return [j for (score, j) in scores[:k]]
 
+
 def detect_line_split(
     old_idx: int,
     first_new_idx: int,
@@ -185,6 +194,7 @@ def detect_line_split(
             break
 
     return best_indices
+
 
 def lhdiff(
     old_lines: List[str],
@@ -240,6 +250,10 @@ def lhdiff(
         if i in mapping:
             continue
 
+        # FIX: do not try to match blank old lines
+        if is_blank(old_norm[i]):
+            continue
+
         candidates = get_candidates_for_line(
             i,
             addition_indices,
@@ -258,6 +272,10 @@ def lhdiff(
         best_score = 0.0
 
         for j in candidates:
+            # FIX: do not match anything to blank new lines
+            if is_blank(new_norm[j]):
+                continue
+
             content_sim = 1.0 - normalized_levenshtein(old_norm[i], new_norm[j])
             ctx_sim = cosine_similarity(old_ctx_vecs[i], new_ctx_vecs[j])
             combined = 0.6 * content_sim + 0.4 * ctx_sim
@@ -289,6 +307,7 @@ def lhdiff(
         final_new_indices: List[int] = []
         for j in split_indices:
             # Compute per-line similarity to compare with existing owners
+            # (we already skipped blank new lines above, so they shouldn't appear here)
             content_sim = 1.0 - normalized_levenshtein(old_norm[i], new_norm[j])
             ctx_sim = cosine_similarity(old_ctx_vecs[i], new_ctx_vecs[j])
             combined = 0.6 * content_sim + 0.4 * ctx_sim
@@ -319,6 +338,7 @@ def lhdiff(
 
     return mapping
 
+
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="LHDiff-style line matcher: OLD_FILE NEW_FILE"
@@ -343,7 +363,7 @@ def main(argv: List[str]) -> None:
         new_lines = [line.rstrip("\n") for line in f]
 
     mapping = lhdiff(old_lines, new_lines)
-    
+
     for old_idx in sorted(mapping.keys()):
         new_idxs = mapping[old_idx]
         new_str = ",".join(str(j + 1) for j in new_idxs)
@@ -373,4 +393,3 @@ def main(argv: List[str]) -> None:
 
 if __name__ == "__main__":
     main(sys.argv)
-

@@ -1,1 +1,8 @@
-
+def greet(name):
+    prefix = "Hello, "
+    suffix = "! Welcome to our program."
+    message = prefix + name + suffix
+    print(message)
+def greet_all(names):
+    for n in names:
+        greet(n)

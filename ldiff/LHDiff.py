@@ -6,23 +6,15 @@ import re
 from collections import Counter
 from typing import List, Tuple, Dict
 
-SIMHASH_BITS = 64           # length of simhash
-CANDIDATES_PER_LINE = 15    # k in the slides
-MAIN_SIM_THRESHOLD = 0.4    # min combined similarity to accept main match
-SPLIT_SIM_THRESHOLD = 0.35  # min combined similarity to keep extra split lines
-CONTEXT_WINDOW = 4          # top/bottom lines for context
-
+SIMHASH_BITS = 64         
+CANDIDATES_PER_LINE = 15 
+MAIN_SIM_THRESHOLD = 0.4   
+SPLIT_SIM_THRESHOLD = 0.35  
+CONTEXT_WINDOW = 4       
 
 def normalize_line(s: str) -> str:
     """
-    Normalize a line to a canonical form so that logically identical lines
-    (even if they differ in spacing) are treated as equal.
-
-    Operations:
-    - strip leading/trailing whitespace
-    - lowercase
-    - collapse multiple spaces
-    - remove spaces around common punctuation (= + - * / [ ] ( ) ,)
+    Normalize a line so that logically identical lines (even if they differ in spacing) are treated as equal.
     """
     s = s.strip().lower()
     # collapse multiple whitespace to a single space
@@ -36,8 +28,10 @@ def is_blank(norm_line: str) -> bool:
     """Return True if a normalized line is empty/whitespace only."""
     return norm_line.strip() == ""
 
-
 def tokenize(s: str) -> List[str]:
+    """
+    Split a string into word tokens. Non-alphanumeric characters are like separators.
+    """
     tokens: List[str] = []
     token = ""
     for ch in s:
@@ -50,7 +44,6 @@ def tokenize(s: str) -> List[str]:
     if token:
         tokens.append(token)
     return tokens
-
 
 def get_context_window(lines: List[str], idx: int, window: int = CONTEXT_WINDOW) -> List[str]:
     start = max(0, idx - window)
@@ -80,6 +73,7 @@ def cosine_similarity(vec1: Dict[str, float], vec2: Dict[str, float]) -> float:
 
 
 def context_vector(norm_lines: List[str], idx: int) -> Dict[str, float]:
+ 
     ctx_text = " ".join(get_context_window(norm_lines, idx))
     tokens = tokenize(ctx_text)
     if not tokens:
@@ -87,14 +81,23 @@ def context_vector(norm_lines: List[str], idx: int) -> Dict[str, float]:
     tf = Counter(tokens)
     return {t: float(c) for t, c in tf.items()}
 
-
 def normalized_levenshtein(s1: str, s2: str) -> float:
+    """
+    Compute normalized Levenshtein distance between two strings.
+
+    - Returns 0.0 if strings are identical.
+    - Returns 1.0 if one is empty and the other is not.
+    - Otherwise, distance / max(len(s1), len(s2)).
+
+    This measures content difference between single lines.
+    """
     if s1 == s2:
         return 0.0
     if not s1 or not s2:
         return 1.0
 
     len1, len2 = len(s1), len(s2)
+    # Standard dynamic programming edit distance, but we only keep two rows.
     prev = list(range(len2 + 1))
     curr = [0] * (len2 + 1)
 
@@ -112,7 +115,6 @@ def normalized_levenshtein(s1: str, s2: str) -> float:
 
     ld = prev[len2]
     return ld / float(max(len1, len2))
-
 
 def simhash(tokens: List[str], bits: int = SIMHASH_BITS) -> int:
     if not tokens:
@@ -134,12 +136,13 @@ def hamming_distance(a: int, b: int) -> int:
     x = a ^ b
     count = 0
     while x:
-        x &= x - 1
+        x &= x - 1   # drop the lowest set bit
         count += 1
     return count
 
 
 def build_line_signatures(norm_lines: List[str], bits: int = SIMHASH_BITS) -> Tuple[List[int], List[int]]:
+
     content_hashes: List[int] = []
     context_hashes: List[int] = []
 
@@ -151,7 +154,6 @@ def build_line_signatures(norm_lines: List[str], bits: int = SIMHASH_BITS) -> Tu
 
     return content_hashes, context_hashes
 
-
 def get_candidates_for_line(
     del_idx: int,
     add_indices: List[int],
@@ -162,6 +164,7 @@ def get_candidates_for_line(
     k: int = CANDIDATES_PER_LINE,
     bits: int = SIMHASH_BITS
 ) -> List[int]:
+   
     c_hash = old_content_hash[del_idx]
     ctx_hash = old_context_hash[del_idx]
     scores = []
@@ -177,9 +180,10 @@ def get_candidates_for_line(
         combined = 0.6 * sim_c + 0.4 * sim_ctx
         scores.append((combined, j))
 
+    # Sort by similarity descending
     scores.sort(reverse=True, key=lambda x: x[0])
+    # Keep only the candidate indices
     return [j for (score, j) in scores[:k]]
-
 
 def detect_line_split(
     old_idx: int,
@@ -188,6 +192,7 @@ def detect_line_split(
     new_norm: List[str],
     max_span: int = 4
 ) -> List[int]:
+
     base = old_norm[old_idx]
     best_indices = [first_new_idx]
     best_dist = normalized_levenshtein(base, new_norm[first_new_idx])
@@ -204,25 +209,28 @@ def detect_line_split(
             best_dist = d
             best_indices = list(cur_indices)
         else:
+            # once extending makes it worse, stop
             break
 
     return best_indices
-
 
 def lhdiff(
     old_lines: List[str],
     new_lines: List[str]
 ) -> Dict[int, List[int]]:
+   
     # Step 1: normalization
     old_norm = [normalize_line(s) for s in old_lines]
     new_norm = [normalize_line(s) for s in new_lines]
 
     # Step 2: detect unchanged lines via diff on normalized content
+    # SequenceMatcher gives us blocks tagged as "equal", "replace", "delete", or "insert"
     sm = difflib.SequenceMatcher(None, old_norm, new_norm)
     opcodes = sm.get_opcodes()
 
     mapping: Dict[int, List[int]] = {}
 
+    # indices of lines that are part of changes
     deletion_indices: List[int] = []
     addition_indices: List[int] = []
 
@@ -234,32 +242,35 @@ def lhdiff(
                 new_idx = j1 + offset
                 mapping[old_idx] = [new_idx]
         else:
-            # collect all deletion and insertion line indices
+            # collect all deletion and insertion line indices within changed blocks
             if tag in ("delete", "replace") and i1 != i2:
                 deletion_indices.extend(range(i1, i2))
             if tag in ("insert", "replace") and j1 != j2:
                 addition_indices.extend(range(j1, j2))
 
-    # If nothing to match, we're done
+    # If there are no deletions or no additions, nothing left to match
     if not deletion_indices or not addition_indices:
         return mapping
 
-    # Step 3: build signatures and context vectors
+    # Step 3: build SimHash signatures and context vectors for all lines
     old_content_hash, old_context_hash = build_line_signatures(old_norm)
     new_content_hash, new_context_hash = build_line_signatures(new_norm)
 
     old_ctx_vecs = [context_vector(old_norm, i) for i in range(len(old_norm))]
     new_ctx_vecs = [context_vector(new_norm, j) for j in range(len(new_norm))]
 
+    # Track "ownership" of each new-line index: which old line currently maps to it
+    # and with what similarity score.
     new_line_owner: Dict[int, Tuple[int, float]] = {}
 
+    # Seed ownership with the unchanged ("equal") mappings from diff
     for old_idx, new_list in mapping.items():
         for new_idx in new_list:
             new_line_owner[new_idx] = (old_idx, 1.0)
 
     # Step 4 & 5: handle changed (deleted) lines using candidates + split detection
     for i in deletion_indices:
-        # skip lines already matched as equal
+        # skip lines already matched as equal (we don't want to remap them)
         if i in mapping:
             continue
 
@@ -267,6 +278,7 @@ def lhdiff(
         if is_blank(old_norm[i]):
             continue
 
+        # 3a: use SimHash-based nearest neighbor search to find candidate new lines
         candidates = get_candidates_for_line(
             i,
             addition_indices,
@@ -280,7 +292,9 @@ def lhdiff(
         if not candidates:
             continue
 
-        # Find best candidate using combined similarity
+        # 4: Among candidates, pick the best one using a more accurate similarity:
+        #    combined = 0.6 * (content similarity using Levenshtein)
+        #             + 0.4 * (context similarity using cosine)
         best_j = None
         best_score = 0.0
 
@@ -296,11 +310,10 @@ def lhdiff(
                 best_score = combined
                 best_j = j
 
-        # Apply main similarity threshold
+        # Apply main similarity threshold: if nothing is good enough, skip this line
         if best_j is None or best_score < MAIN_SIM_THRESHOLD:
             continue
 
-        # Conflict resolution: if some other old line already owns best_j
         owner = new_line_owner.get(best_j)
         if owner is not None:
             owner_old, owner_score = owner
@@ -314,11 +327,12 @@ def lhdiff(
                     if not mapping[owner_old]:
                         del mapping[owner_old]
 
-        # Step 5: line split detection (extend to multiple consecutive new lines)
+        # Step 5: line split detection (extend mapping from best_j to multiple new lines)
         split_indices = detect_line_split(i, best_j, old_norm, new_norm)
 
         final_new_indices: List[int] = []
         for j in split_indices:
+            # Recompute similarity per new line (used to compare with existing owners)
             content_sim = 1.0 - normalized_levenshtein(old_norm[i], new_norm[j])
             ctx_sim = cosine_similarity(old_ctx_vecs[i], new_ctx_vecs[j])
             combined = 0.6 * content_sim + 0.4 * ctx_sim
@@ -349,7 +363,6 @@ def lhdiff(
 
     return mapping
 
-
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="LHDiff-style line matcher: OLD_FILE NEW_FILE"
@@ -368,7 +381,6 @@ def main(argv: List[str]) -> None:
     args = parse_args(argv)
 
     with open(args.old_file, "r", encoding="utf-8", errors="replace") as f:
-        # strip both \n and \r so Windows line endings don't mess us up
         old_lines = [line.rstrip("\r\n") for line in f]
 
     with open(args.new_file, "r", encoding="utf-8", errors="replace") as f:
@@ -376,11 +388,13 @@ def main(argv: List[str]) -> None:
 
     mapping = lhdiff(old_lines, new_lines)
 
+    # Print mappings with 1-based line numbers
     for old_idx in sorted(mapping.keys()):
         new_idxs = mapping[old_idx]
         new_str = ",".join(str(j + 1) for j in new_idxs)
         print(f"{old_idx + 1} -> {new_str}")
 
+    # Print unmatched deletions/additions
     if args.show_unmatched:
         old_line_count = len(old_lines)
         new_line_count = len(new_lines)

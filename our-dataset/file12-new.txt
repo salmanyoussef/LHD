@@ -1,1 +1,16 @@
+FAHRENHEIT_OFFSET = 32
+KELVIN_OFFSET = 273.15
+def c_to_f(c):
+    return c * 9/5 + FAHRENHEIT_OFFSET
+def f_to_c(f):
+    return (f - FAHRENHEIT_OFFSET) * 5/9
+def c_to_k(c):
+    return c + KELVIN_OFFSET
+def k_to_c(k):
+    return k - KELVIN_OFFSET
+def print_table(start=0, end=100, step=10):
+    for c in range(start, end + 1, step):
+        f = c_to_f(c)
+        k = c_to_k(c)
+        print(c, f, k)
 

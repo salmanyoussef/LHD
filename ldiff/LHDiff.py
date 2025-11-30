@@ -2,6 +2,7 @@ import sys
 import math
 import difflib
 import argparse
+import re
 from collections import Counter
 from typing import List, Tuple, Dict
 
@@ -13,9 +14,22 @@ CONTEXT_WINDOW = 4          # top/bottom lines for context
 
 
 def normalize_line(s: str) -> str:
+    """
+    Normalize a line to a canonical form so that logically identical lines
+    (even if they differ in spacing) are treated as equal.
+
+    Operations:
+    - strip leading/trailing whitespace
+    - lowercase
+    - collapse multiple spaces
+    - remove spaces around common punctuation (= + - * / [ ] ( ) ,)
+    """
     s = s.strip().lower()
-    parts = s.split()
-    return " ".join(parts)
+    # collapse multiple whitespace to a single space
+    s = re.sub(r"\s+", " ", s)
+    # remove spaces around punctuation/operators
+    s = re.sub(r"\s*([=+\-*/\[\]\(\),])\s*", r"\1", s)
+    return s
 
 
 def is_blank(norm_line: str) -> bool:
@@ -47,7 +61,6 @@ def get_context_window(lines: List[str], idx: int, window: int = CONTEXT_WINDOW)
 def cosine_similarity(vec1: Dict[str, float], vec2: Dict[str, float]) -> float:
     if not vec1 or not vec2:
         return 0.0
-    # Use smaller dict for iteration
     if len(vec1) < len(vec2):
         smaller, larger = vec1, vec2
     else:
@@ -250,7 +263,7 @@ def lhdiff(
         if i in mapping:
             continue
 
-        # FIX: do not try to match blank old lines
+        # do not try to match blank old lines
         if is_blank(old_norm[i]):
             continue
 
@@ -272,7 +285,7 @@ def lhdiff(
         best_score = 0.0
 
         for j in candidates:
-            # FIX: do not match anything to blank new lines
+            # do not match anything to blank new lines
             if is_blank(new_norm[j]):
                 continue
 
@@ -306,8 +319,6 @@ def lhdiff(
 
         final_new_indices: List[int] = []
         for j in split_indices:
-            # Compute per-line similarity to compare with existing owners
-            # (we already skipped blank new lines above, so they shouldn't appear here)
             content_sim = 1.0 - normalized_levenshtein(old_norm[i], new_norm[j])
             ctx_sim = cosine_similarity(old_ctx_vecs[i], new_ctx_vecs[j])
             combined = 0.6 * content_sim + 0.4 * ctx_sim
@@ -357,10 +368,11 @@ def main(argv: List[str]) -> None:
     args = parse_args(argv)
 
     with open(args.old_file, "r", encoding="utf-8", errors="replace") as f:
-        old_lines = [line.rstrip("\n") for line in f]
+        # strip both \n and \r so Windows line endings don't mess us up
+        old_lines = [line.rstrip("\r\n") for line in f]
 
     with open(args.new_file, "r", encoding="utf-8", errors="replace") as f:
-        new_lines = [line.rstrip("\n") for line in f]
+        new_lines = [line.rstrip("\r\n") for line in f]
 
     mapping = lhdiff(old_lines, new_lines)
 

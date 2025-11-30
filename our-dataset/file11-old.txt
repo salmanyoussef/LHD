@@ -1,17 +1,15 @@
-def compute_total(prices):
+def add(a, b):
+    return a + b
+def subtract(a, b):
+    return a - b
+def multiply(a, b):
+    return a * b
+def divide(a, b):
+    if b == 0:
+        raise ValueError("Cannot divide by zero")
+    return a / b
+def average(numbers):
     total = 0
-    for p in prices:
-        total += p
-    return total
-
-def apply_discount(total, rate):
-    discount = total * rate
-    final = total - discount
-    return final
-
-def main():
-    items = [10, 20, 30]
-    total = compute_total(items)
-    final = apply_discount(total, 0.1)
-    print("Final:", final)
-
+    for n in numbers:
+        total += n
+    return total / len(numbers)

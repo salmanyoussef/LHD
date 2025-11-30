@@ -1,1 +1,17 @@
+def compute_total(prices):
+    total = 0
+    for p in prices:
+        total += p
+    return total
+
+def apply_discount(total, rate):
+    discount = total * rate
+    final = total - discount
+    return final
+
+def main():
+    items = [10, 20, 30]
+    total = compute_total(items)
+    final = apply_discount(total, 0.1)
+    print("Final:", final)
 

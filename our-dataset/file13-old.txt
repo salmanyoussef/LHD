@@ -1,1 +1,6 @@
-
+def greet(name):
+    message = "Hello, " + name + "! Welcome to our program."
+    print(message)
+def greet_all(names):
+    for n in names:
+        greet(n)

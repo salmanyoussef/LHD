@@ -1,1 +1,8 @@
-
+def is_even(n):
+    return n % 2 == 0
+def filter_even(numbers):
+    return [n for n in numbers if is_even(n)]
+def square(numbers):
+    return [n * n for n in numbers]
+def even_squares(numbers):
+    return square(filter_even(numbers))

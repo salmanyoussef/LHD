@@ -1,0 +1,17 @@
+public class NegativeCounter {
+    public static int countNegative(int[] data) {
+        int count = 0;
+        for (int d : data) {
+            if (d < 0) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public static void main(String[] args) {
+        int[] data = new int[] {4, -1, -9, 3, 6, -2};
+        int c = countNegative(data);
+        System.out.println("Negative count: " + c);
+    }
+}

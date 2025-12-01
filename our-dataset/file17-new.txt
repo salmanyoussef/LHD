@@ -1,0 +1,17 @@
+public class CountHigh {
+    public static int countHigh(int[] nums) {
+        int count = 0;
+        for (int n : nums) {
+            if (n >= 50) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public static void main(String[] args) {
+        int[] nums = new int[] {12, 50, 88, 43, 90, 51};
+        int result = countHigh(nums);
+        System.out.println("Count ≥ 50: " + result);
+    }
+}

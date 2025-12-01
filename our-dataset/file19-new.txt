@@ -1,0 +1,15 @@
+public class Multiplier {
+    public static long multiply(int[] arr) {
+        long product = 1;
+        for (int a : arr) {
+            product *= a;
+        }
+        return product;
+    }
+
+    public static void main(String[] args) {
+        int[] arr = new int[] {2, 3, 4};
+        long product = multiply(arr);
+        System.out.println("Product: " + product);
+    }
+}

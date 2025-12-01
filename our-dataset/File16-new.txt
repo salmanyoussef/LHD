@@ -1,0 +1,20 @@
+public class EvenSum {
+    public static int sumEven(int[] values) {
+        if (values == null || values.length == 0) {
+            throw new IllegalArgumentException("Array must not be empty");
+        }
+        int sum = 0;
+        for (int v : values) {
+            if (v % 2 == 0) {
+                sum += v;
+            }
+        }
+        return sum;
+    }
+
+    public static void main(String[] args) {
+        int[] data = new int[] {3, 8, 12, 5, 20};
+        int result = sumEven(data);
+        System.out.println("Sum of even numbers: " + result);
+    }
+}

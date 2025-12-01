@@ -1,0 +1,12 @@
+public class MaxFinder {
+    public static void main(String[] args) {
+        int[] numbers = new int[] {4, 29, 15, 88, 22};
+        int m = numbers[0];
+        for (int n : numbers) {
+            if (n > m) {
+                m = n;
+            }
+        }
+        System.out.println("Max value: " + m);
+    }
+}

@@ -1,0 +1,17 @@
+public class MaxFinder {
+    public static int max(int[] numbers) {
+        int m = numbers[0];
+        for (int n : numbers) {
+            if (n > m) {
+                m = n;
+            }
+        }
+        return m;
+    }
+
+    public static void main(String[] args) {
+        int[] numbers = new int[] {4, 29, 15, 88, 22};
+        int result = max(numbers);
+        System.out.println("Max value: " + result);
+    }
+}

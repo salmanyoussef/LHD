@@ -268,7 +268,7 @@ def lhdiff(
         for new_idx in new_list:
             new_line_owner[new_idx] = (old_idx, 1.0)
 
-    # Step 4 & 5: handle changed (deleted) lines using candidates + split detection
+    # Step 4 & 5: handle changed lines using candidates + split detection
     for i in deletion_indices:
         # skip lines already matched as equal (we don't want to remap them)
         if i in mapping:

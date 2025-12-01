@@ -1,0 +1,12 @@
+public class NegativeCounter {
+    public static void main(String[] args) {
+        int[] data = new int[] {4, -1, -9, 3, 6, -2};
+        int count = 0;
+        for (int d : data) {
+            if (d < 0) {
+                count++;
+            }
+        }
+        System.out.println("Negative count: " + count);
+    }
+}

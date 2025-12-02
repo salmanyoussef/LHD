@@ -30,15 +30,6 @@ def preprocess_file(lines):
 def is_blank_pre(line: str) -> bool:
     return line == ""
 
-
-KEYWORDS = {
-    "if", "else", "for", "while", "return", "def", "class", "try", "except",
-    "finally", "break", "continue", "import", "from", "as", "with", "print",
-    "in", "not", "and", "or", "true", "false", "none", "public", "static",
-    "void", "int", "double", "float", "string", "boolean"
-}
-
-
 def structural_tokens(line: str) -> List[str]:
     if not line:
         return []

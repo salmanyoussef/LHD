@@ -1,16 +1,50 @@
-def count_lines(path):
-    count = 0
+def load_numbers(path):
+    numbers = []
     with open(path, "r", encoding="utf-8") as f:
-        for _ in f:
-            count += 1
-    return count
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                value = float(line)
+            except ValueError:
+                print("Skipping invalid value:", line)
+                continue
+            numbers.append(value)
+    return numbers
+def compute_stats(values):
+    if not values:
+        return 0.0, 0.0, 0.0, 0
+    total = sum(values)
+    count = len(values)
+    mean = total / count
+    squared_diffs = []
+    for v in values:
+        squared_diffs.append((v - mean) ** 2)
+    variance = sum(squared_diffs) / count
+    minimum = min(values)
+    maximum = max(values)
+    spread = maximum - minimum
+    return mean, variance, spread, count
+def format_float(value):
+    return f"{value:.3f}"
+def print_report(path, mean, variance, spread, count, above_count):
+    print("Statistics for file:", path)
+    print("Total values:", count)
+    print("Mean:", format_float(mean))
+    print("Variance:", format_float(variance))
+    print("Spread:", format_float(spread))
+    print("Values above mean:", above_count)
+def filter_above_mean(values, mean):
+    result = []
+    for v in values:
+        if v > mean:
+            result.append(v)
+    return result
 def main():
-    filename = input("Enter a file name: ")
-    try:
-        total = count_lines(filename)
-    except FileNotFoundError:
-        print("File not found:", filename)
-        return
-    print("Total lines:", total)
-if __name__ == "__main__":
-    main()
+    filename = input("Enter data file path: ")
+    values = load_numbers(filename)
+    mean, variance, spread, count = compute_stats(values)
+    above_count = len(filter_above_mean(values, mean))
+    print_report(filename, mean, variance, spread, count, above_count)
+if __name__ == "__main__": main()

@@ -1,16 +1,62 @@
-FAHRENHEIT_OFFSET = 32
-KELVIN_OFFSET = 273.15
-def c_to_f(c):
-    return c * 9/5 + FAHRENHEIT_OFFSET
-def f_to_c(f):
-    return (f - FAHRENHEIT_OFFSET) * 5/9
-def c_to_k(c):
-    return c + KELVIN_OFFSET
-def k_to_c(k):
-    return k - KELVIN_OFFSET
-def print_table(start=0, end=100, step=10):
-    for c in range(start, end + 1, step):
-        f = c_to_f(c)
-        k = c_to_k(c)
-        print(c, f, k)
-
+def read_tasks(path):
+    tasks = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(",")
+            if len(parts) != 3:
+                continue
+            title = parts[0].strip()
+            priority = parts[1].strip().lower()
+            done_flag = parts[2].strip().lower() == "done"
+            tasks.append({
+                "title": title,
+                "priority": priority,
+                "done": done_flag,
+            })
+    return tasks
+def count_done(tasks):
+    return sum(1 for task in tasks if task["done"])
+def count_not_done(tasks):
+    return sum(1 for task in tasks if not task["done"])
+def filter_by_priority(tasks, level):
+    level = level.lower()
+    result = []
+    for task in tasks:
+        if task["priority"] == level:
+            result.append(task)
+    return result
+def print_header():
+    print("=== Task Manager Summary ===")
+    print("============================")
+def print_task(task, index):
+    status = "DONE" if task["done"] else "PENDING"
+    print(f"{index}. {task['title']} [{task['priority']}] - {status}")
+def print_summary(tasks):
+    total = len(tasks)
+    done = count_done(tasks)
+    not_done = count_not_done(tasks)
+    high = len(filter_by_priority(tasks, "high"))
+    medium = len(filter_by_priority(tasks, "medium"))
+    print("Total tasks:", total)
+    print("Completed tasks:", done)
+    print("Pending tasks:", not_done)
+    print("High priority tasks:", high)
+    print("Medium priority tasks:", medium)
+def print_all(tasks):
+    if not tasks:
+        print("No tasks found.")
+        return
+    print("Current tasks:")
+    for i, task in enumerate(tasks, start=1):
+        print_task(task, i)
+def main():
+    filename = input("Enter path to tasks file: ")
+    tasks = read_tasks(filename)
+    print_header()
+    print_all(tasks)
+    print_summary(tasks)
+if __name__ == "__main__":
+    main()

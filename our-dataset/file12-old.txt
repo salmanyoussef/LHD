@@ -1,13 +1,59 @@
-def c_to_f(c):
-    return c * 9/5 + 32
-def f_to_c(f):
-    return (f - 32) * 5/9
-def c_to_k(c):
-    return c + 273.15
-def k_to_c(k):
-    return k - 273.15
-def print_table():
-    for c in range(0, 101, 10):
-        f = c_to_f(c)
-        k = c_to_k(c)
-        print(c, f, k)
+def read_tasks(path):
+    tasks = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(",")
+            if len(parts) != 3:
+                continue
+            title = parts[0].strip()
+            priority = parts[1].strip()
+            done_flag = parts[2].strip().lower() == "done"
+            tasks.append({
+                "title": title,
+                "priority": priority,
+                "done": done_flag,
+            })
+    return tasks
+def count_done(tasks):
+    return sum(1 for task in tasks if task["done"])
+def count_not_done(tasks):
+    return sum(1 for task in tasks if not task["done"])
+def filter_by_priority(tasks, level):
+    result = []
+    for task in tasks:
+        if task["priority"] == level:
+            result.append(task)
+    return result
+def print_header():
+    print("=== Task Manager Report ===")
+    print("---------------------------")
+def print_task(task, index):
+    status = "done" if task["done"] else "pending"
+    print(f"{index}. {task['title']} [{task['priority']}] - {status}")
+def print_summary(tasks):
+    total = len(tasks)
+    done = count_done(tasks)
+    not_done = count_not_done(tasks)
+    high = len(filter_by_priority(tasks, "high"))
+    print("Total tasks:", total)
+    print("Completed tasks:", done)
+    print("Pending tasks:", not_done)
+    print("High priority tasks:", high)
+def print_all(tasks):
+    if not tasks:
+        print("No tasks to show.")
+        return
+    print("Task list:")
+    for i, task in enumerate(tasks, start=1):
+        print_task(task, i)
+def main():
+    filename = input("Enter tasks file: ")
+    tasks = read_tasks(filename)
+    print_header()
+    print_all(tasks)
+    print_summary(tasks)
+if __name__ == "__main__":
+    main()

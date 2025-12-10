@@ -13,6 +13,11 @@ SIM_THRESHOLD = 0.35
 SPLIT_THRESHOLD = 0.65
 MERGE_THRESHOLD = 0.65
 
+KEYWORDS = {
+    "if", "else", "for", "while", "return", "class", "def", "try", "except",
+    "finally", "import", "from", "with", "as", "break", "continue", "pass",
+    "lambda", "yield", "in", "not", "and", "or"
+}
 
 def preprocess_line(line: str) -> str:
     line = line.rstrip("\n").lower()

@@ -9,3 +9,31 @@ public class StatsExample {
         System.out.println("Average: " + avg);
     }
 }
+
+public class StatsAnalyzer {
+    public static int min(int[] values) {
+        int currentMin = values[0];
+        for (int v : values) {
+            if (v < currentMin) {
+                currentMin = v;
+            }
+        }
+        return currentMin;
+    }
+
+    public static int max(int[] values) {
+        int currentMax = values[0];
+        for (int v : values) {
+            if (v > currentMax) {
+                currentMax = v;
+            }
+        }
+        return currentMax;
+    }
+
+    public static void printStats(int[] values) {
+        System.out.println("Count: " + values.length);
+        System.out.println("Min: " + min(values));
+        System.out.println("Max: " + max(values));
+    }
+}

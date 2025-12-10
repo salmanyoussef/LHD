@@ -16,3 +16,40 @@ public class StatsExample {
         System.out.println("Average: " + avg);
     }
 }
+
+public class StatsAnalyzer {
+    private static void validate(int[] values) {
+        if (values == null || values.length == 0) {
+            throw new IllegalArgumentException("values must not be empty");
+        }
+    }
+
+    public static int min(int[] values) {
+        validate(values);
+        int currentMin = values[0];
+        for (int v : values) {
+            if (v < currentMin) {
+                currentMin = v;
+            }
+        }
+        return currentMin;
+    }
+
+    public static int max(int[] values) {
+        validate(values);
+        int currentMax = values[0];
+        for (int v : values) {
+            if (v > currentMax) {
+                currentMax = v;
+            }
+        }
+        return currentMax;
+    }
+
+    public static void printStats(int[] values) {
+        validate(values);
+        System.out.println("Count: " + values.length);
+        System.out.println("Min: " + min(values));
+        System.out.println("Max: " + max(values));
+    }
+}

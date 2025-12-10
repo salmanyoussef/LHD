@@ -6,10 +6,117 @@ def load_config(path):
         f.close()
     return data
 
+
+def parse_config(raw):
+    lines = raw.splitlines()
+    config = {}
+    for line in lines:
+        line = line.strip()
+        if not line:
+            # skip empty lines
+            continue
+        if line.startswith("#"):
+            # skip comments
+            continue
+        if ":" not in line:
+            # ignore malformed lines
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        config[key] = value
+    return config
+
+
+def validate_config(config):
+    errors = []
+    if "host" not in config:
+        errors.append("Missing required key: host")
+    if "port" not in config:
+        errors.append("Missing required key: port")
+    else:
+        try:
+            int(config["port"])
+        except ValueError:
+            errors.append("Port must be an integer")
+
+    if "debug" in config and config["debug"].lower() not in ("true", "false"):
+        errors.append("Debug must be 'true' or 'false' if present")
+
+    return errors
+
+
+def apply_defaults(config):
+    if "host" not in config:
+        config["host"] = "localhost"
+    if "port" not in config:
+        config["port"] = "8080"
+    if "debug" not in config:
+        config["debug"] = "false"
+    if "log_level" not in config:
+        config["log_level"] = "INFO"
+    return config
+
+
+def format_config(config):
+    lines = []
+    for key in sorted(config.keys()):
+        lines.append(f"{key} = {config[key]}")
+    return "\n".join(lines)
+
+
+def summarize_config(config):
+    summary = []
+    summary.append("Configuration Summary")
+    summary.append("---------------------")
+    summary.append(f"Host      : {config.get('host', '<unset>')}")
+    summary.append(f"Port      : {config.get('port', '<unset>')}")
+    summary.append(f"Debug     : {config.get('debug', '<unset>')}")
+    summary.append(f"Log Level : {config.get('log_level', '<unset>')}")
+    return "\n".join(summary)
+
+
+def interactive_confirm(config):
+    print("Loaded configuration:")
+    print(format_config(config))
+    print()
+    answer = input("Do you want to continue with this configuration? [y/N]: ")
+    answer = answer.strip().lower()
+    return answer == "y"
+
+
 def main():
     raw = load_config("settings.yml")
     print("Loaded:")
     print(raw)
+
+    config = parse_config(raw)
+    print("\nParsed configuration dictionary:")
+    print(config)
+
+    errors = validate_config(config)
+    if errors:
+        print("\nConfiguration errors detected:")
+        for e in errors:
+            print(" - " + e)
+        print("\nExiting due to invalid configuration.")
+        return
+
+    config = apply_defaults(config)
+    print("\nAfter applying defaults:")
+    print(format_config(config))
+
+    print("\n" + summarize_config(config))
+
+    if not interactive_confirm(config):
+        print("User cancelled. Exiting.")
+        return
+
+    print("Starting application with the above configuration...")
+    # Here you would start the real application.
+    # For the example, just print a placeholder.
+    print("Application started.")
+
 
 if __name__ == "__main__":
     main()

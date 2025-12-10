@@ -1,11 +1,149 @@
+import os
+
+
 def load_config(path):
     with open(path) as f:
         data = f.read()
     return data
 
+
+def parse_config(raw):
+    lines = raw.splitlines()
+    config = {}
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        config[key] = value
+    return config
+
+
+def load_env_overrides(prefix="APP_"):
+    overrides = {}
+    for key, value in os.environ.items():
+        if key.startswith(prefix):
+            config_key = key[len(prefix):].lower()
+            overrides[config_key] = value
+    return overrides
+
+
+def merge_config(base, overrides):
+    result = dict(base)
+    for key, value in overrides.items():
+        result[key] = value
+    return result
+
+
+def validate_config(config):
+    errors = []
+    host = config.get("host")
+    port = config.get("port")
+    debug = config.get("debug")
+
+    if not host:
+        errors.append("Missing required key: host")
+
+    if not port:
+        errors.append("Missing required key: port")
+    else:
+        try:
+            int(port)
+        except ValueError:
+            errors.append("Port must be an integer")
+
+    if debug is not None and debug.lower() not in ("true", "false"):
+        errors.append("Debug must be 'true' or 'false' if present")
+
+    log_level = config.get("log_level")
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    if log_level and log_level.upper() not in valid_levels:
+        errors.append("Log level must be one of: " + ", ".join(sorted(valid_levels)))
+
+    return errors
+
+
+def apply_defaults(config):
+    config = dict(config)
+    config.setdefault("host", "localhost")
+    config.setdefault("port", "8080")
+    config.setdefault("debug", "false")
+    config.setdefault("log_level", "INFO")
+    return config
+
+
+def to_bool(value):
+    return str(value).strip().lower() == "true"
+
+
+def format_config(config):
+    lines = []
+    for key in sorted(config.keys()):
+        lines.append(f"{key} = {config[key]}")
+    return "\n".join(lines)
+
+
+def summarize_config(config):
+    summary = []
+    summary.append("Configuration Summary")
+    summary.append("---------------------")
+    summary.append(f"Host      : {config.get('host', '<unset>')}")
+    summary.append(f"Port      : {config.get('port', '<unset>')}")
+    summary.append(f"Debug     : {config.get('debug', '<unset>')}")
+    summary.append(f"Log Level : {config.get('log_level', '<unset>')}")
+    enabled_features = config.get("features", "")
+    summary.append(f"Features  : {enabled_features or '<none>'}")
+    return "\n".join(summary)
+
+
+def interactive_confirm(config):
+    print("Final configuration:")
+    print(format_config(config))
+    print()
+    answer = input("Proceed with this configuration? [y/N]: ")
+    return answer.strip().lower() == "y"
+
+
 def main():
     raw = load_config("settings.yml")
     print("Loaded:\n" + raw)
+
+    base_config = parse_config(raw)
+    env_overrides = load_env_overrides()
+    merged = merge_config(base_config, env_overrides)
+    merged = apply_defaults(merged)
+
+    errors = validate_config(merged)
+    if errors:
+        print("\nConfiguration errors:")
+        for e in errors:
+            print(" - " + e)
+        print("\nPlease fix the configuration before running again.")
+        return
+
+    print("\n" + summarize_config(merged))
+
+    if not interactive_confirm(merged):
+        print("User chose not to proceed. Exiting.")
+        return
+
+    # Use normalized types for runtime
+    host = merged["host"]
+    port = int(merged["port"])
+    debug = to_bool(merged["debug"])
+    log_level = merged["log_level"].upper()
+
+    print("\nStarting application with settings:")
+    print(f"  host={host}")
+    print(f"  port={port}")
+    print(f"  debug={debug}")
+    print(f"  log_level={log_level}")
+    print("\nApplication started.")
+
 
 if __name__ == "__main__":
     main()

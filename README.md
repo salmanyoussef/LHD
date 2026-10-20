@@ -1,8 +1,6 @@
 # LHDiff — Source Code Line Mapping and Change Tracking
 
-A Python coursework project for tracking how individual lines correspond between two versions of a file, including edited, moved, split, and merged lines.
-
-Developed collaboratively for **COMP 3110 — Software Engineering** at the **University of Windsor, Fall 2025**.
+A Python project for tracking how individual lines correspond between two versions of a file, including edited, moved, split, and merged lines.
 
 ## Overview
 

@@ -110,7 +110,7 @@ Other limitations include heuristic thresholds, simplified structural tokens, pr
 
 **Albert Qyli, Salman Youssef, Omar Kayali, Badr Kayyali, and Youcef Teffahi.**
 
-The project was a collaborative group effort. Salman Youssef contributed to algorithm design and Python implementation, preprocessing and comparison approaches, dataset construction and expected mappings, interface mockups, and the technical report.
+The project was a collaborative group effort.
 
 ## Possible next steps
 
